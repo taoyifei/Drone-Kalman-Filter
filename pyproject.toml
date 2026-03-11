@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drone-kalman-filter"
+version = "0.1.0"
+description = "Fixed-lag Kalman smoother plugin for DetectionTarget streams."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0", "matplotlib>=3.9"]
+
+[tool.setuptools]
+packages = ["drone_kalman_filter", "drone_kalman_validation", "drone_kalman_visualization"]
+
+[tool.setuptools.package-dir]
+drone_kalman_filter = "src/drone_kalman_filter"
+drone_kalman_validation = "tooling/drone_kalman_validation"
+drone_kalman_visualization = "tooling/drone_kalman_visualization"
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tooling"]
+testpaths = ["tests"]
