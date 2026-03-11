@@ -1,9 +1,13 @@
+"""主链路配置与配置校验。"""
+
 from dataclasses import dataclass
 from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
 class PluginConfig:
+    """保存主链路运行需要的全部配置。"""
+
     # 主链路模式：纯 Kalman，或“预处理 + Kalman”的鲁棒模式。
     smoother_mode: Literal["kalman", "robust_prefilter_kalman"] = "kalman"
     # 主平滑窗口参数。
@@ -35,54 +39,94 @@ class PluginConfig:
     prefilter_median_window_size: int = 3
 
     def __post_init__(self) -> None:
+        """校验配置项组合是否合法。"""
         # 这里集中做参数防御，避免运行时出现难排查的配置组合错误。
         if self.smoother_mode not in {"kalman", "robust_prefilter_kalman"}:
-            raise ValueError("smoother_mode must be 'kalman' or 'robust_prefilter_kalman'")
-        if self.window_size < 3:
-            raise ValueError("window_size must be at least 3")
-        if self.lag_points < 1:
-            raise ValueError("lag_points must be positive")
-        if self.lag_points >= self.window_size:
-            raise ValueError("lag_points must be smaller than window_size")
-        if self.min_dt_seconds <= 0:
-            raise ValueError("min_dt_seconds must be positive")
-        if self.max_segment_gap_seconds <= 0:
-            raise ValueError("max_segment_gap_seconds must be positive")
-        if self.idle_flush_seconds <= 0:
-            raise ValueError("idle_flush_seconds must be positive")
-        if self.measurement_sigma_m <= 0:
-            raise ValueError("measurement_sigma_m must be positive")
-        if self.process_accel_sigma_mps2 <= 0:
-            raise ValueError("process_accel_sigma_mps2 must be positive")
-        if self.initial_position_sigma_m <= 0:
-            raise ValueError("initial_position_sigma_m must be positive")
-        if self.initial_velocity_sigma_mps <= 0:
-            raise ValueError("initial_velocity_sigma_mps must be positive")
-        if self.soft_residual_speed_mps <= 0:
-            raise ValueError("soft_residual_speed_mps must be positive")
+            raise ValueError(
+                "smoother_mode must be 'kalman' or 'robust_prefilter_kalman'")
+        _validate_minimum("window_size",
+                          self.window_size,
+                          minimum=3,
+                          message="window_size must be at least 3")
+        _validate_positive("lag_points", self.lag_points)
+        _validate_positive("min_dt_seconds", self.min_dt_seconds)
+        _validate_positive("max_segment_gap_seconds",
+                           self.max_segment_gap_seconds)
+        _validate_positive("idle_flush_seconds", self.idle_flush_seconds)
+        _validate_positive("measurement_sigma_m", self.measurement_sigma_m)
+        _validate_positive("process_accel_sigma_mps2",
+                           self.process_accel_sigma_mps2)
+        _validate_positive("initial_position_sigma_m",
+                           self.initial_position_sigma_m)
+        _validate_positive("initial_velocity_sigma_mps",
+                           self.initial_velocity_sigma_mps)
+        _validate_positive("soft_residual_speed_mps",
+                           self.soft_residual_speed_mps)
         if self.hard_residual_speed_mps <= self.soft_residual_speed_mps:
-            raise ValueError("hard_residual_speed_mps must be larger than soft_residual_speed_mps")
-        if self.soft_noise_scale < 1.0:
-            raise ValueError("soft_noise_scale must be at least 1.0")
-        if self.prefilter_window_size < 3:
-            raise ValueError("prefilter_window_size must be at least 3")
-        if self.prefilter_lag_points < 1:
-            raise ValueError("prefilter_lag_points must be positive")
-        if self.prefilter_lag_points >= self.prefilter_window_size:
-            raise ValueError("prefilter_lag_points must be smaller than prefilter_window_size")
-        if self.prefilter_soft_speed_mps <= 0:
-            raise ValueError("prefilter_soft_speed_mps must be positive")
+            raise ValueError("hard_residual_speed_mps must be larger than "
+                             "soft_residual_speed_mps")
+        _validate_minimum("soft_noise_scale",
+                          self.soft_noise_scale,
+                          minimum=1.0,
+                          message="soft_noise_scale must be at least 1.0")
+        _validate_minimum(
+            "prefilter_window_size",
+            self.prefilter_window_size,
+            minimum=3,
+            message="prefilter_window_size must be at least 3",
+        )
+        _validate_positive("prefilter_lag_points", self.prefilter_lag_points)
+        _validate_positive("prefilter_soft_speed_mps",
+                           self.prefilter_soft_speed_mps)
         if self.prefilter_hard_speed_mps <= self.prefilter_soft_speed_mps:
-            raise ValueError("prefilter_hard_speed_mps must be larger than prefilter_soft_speed_mps")
-        if self.prefilter_hard_distance_m <= 0:
-            raise ValueError("prefilter_hard_distance_m must be positive")
-        if self.prefilter_hard_distance_dt_seconds <= 0:
-            raise ValueError("prefilter_hard_distance_dt_seconds must be positive")
-        if self.prefilter_bridge_neighbor_distance_m <= 0:
-            raise ValueError("prefilter_bridge_neighbor_distance_m must be positive")
-        if self.prefilter_bridge_center_distance_m <= self.prefilter_bridge_neighbor_distance_m:
-            raise ValueError("prefilter_bridge_center_distance_m must be larger than prefilter_bridge_neighbor_distance_m")
-        if self.prefilter_burst_max_run_length < 1:
-            raise ValueError("prefilter_burst_max_run_length must be at least 1")
-        if self.prefilter_median_window_size < 1 or self.prefilter_median_window_size % 2 == 0:
-            raise ValueError("prefilter_median_window_size must be a positive odd integer")
+            raise ValueError("prefilter_hard_speed_mps must be larger than "
+                             "prefilter_soft_speed_mps")
+        _validate_positive("prefilter_hard_distance_m",
+                           self.prefilter_hard_distance_m)
+        _validate_positive("prefilter_hard_distance_dt_seconds",
+                           self.prefilter_hard_distance_dt_seconds)
+        _validate_positive("prefilter_bridge_neighbor_distance_m",
+                           self.prefilter_bridge_neighbor_distance_m)
+        if (self.prefilter_bridge_center_distance_m
+                <= self.prefilter_bridge_neighbor_distance_m):
+            raise ValueError(
+                "prefilter_bridge_center_distance_m must be larger than "
+                "prefilter_bridge_neighbor_distance_m")
+        _validate_minimum(
+            "prefilter_burst_max_run_length",
+            self.prefilter_burst_max_run_length,
+            minimum=1,
+            message="prefilter_burst_max_run_length must be at least 1",
+        )
+        if (self.prefilter_median_window_size < 1 or
+                self.prefilter_median_window_size % 2 == 0):
+            raise ValueError(
+                "prefilter_median_window_size must be a positive odd integer")
+        _validate_window_relation("lag_points", self.lag_points, "window_size",
+                                  self.window_size)
+        _validate_window_relation(
+            "prefilter_lag_points",
+            self.prefilter_lag_points,
+            "prefilter_window_size",
+            self.prefilter_window_size,
+        )
+
+
+def _validate_positive(name: str, value: float) -> None:
+    """校验数值必须为正。"""
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _validate_minimum(name: str, value: float, *, minimum: float,
+                      message: str) -> None:
+    """校验数值必须不小于给定下限。"""
+    if value < minimum:
+        raise ValueError(message)
+
+
+def _validate_window_relation(lag_name: str, lag_value: int, window_name: str,
+                              window_value: int) -> None:
+    """校验滞后点数必须小于窗口大小。"""
+    if lag_value >= window_value:
+        raise ValueError(f"{lag_name} must be smaller than {window_name}")

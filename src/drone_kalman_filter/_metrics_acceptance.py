@@ -1,0 +1,337 @@
+"""设备级验收指标与违规点聚合。"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+from drone_kalman_filter.config import PluginConfig
+from drone_kalman_filter._metrics_alignment import AlignedPoint
+from drone_kalman_filter._metrics_statistics import (
+    distribution,
+    haversine_m,
+    vector_angle_deg,
+    vector_m,
+)
+
+JUMP_TAG_SPEED_MPS = 45.0
+RECOVERY_JUMP_SPEED_MPS = 100.0
+NORMAL_POINT_EXCLUSION_AFTER = 5
+NORMAL_POINT_OFFSET_THRESHOLD_M = 50.0
+MIN_POINTS_FOR_HARD_GATE = 200
+DENSE_DEVICE_DT_P95_THRESHOLD_S = 10.0
+DIRECTION_FLIP_MIN_STEP_M = 10.0
+DIRECTION_FLIP_ANGLE_DEG = 120.0
+RECOVERY_OFFSET_THRESHOLD_M = 20.0
+RECOVERY_POINTS_THRESHOLD = 3
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceAcceptanceResult:
+    """保存单个 device 的验收结果和全局聚合材料。"""
+
+    summary: dict[str, object]
+    violations: list[dict[str, object]]
+    global_offset_values: list[float]
+    normal_offset_values: list[float]
+    recovery_points: list[int]
+    raw_flip_count: int
+    smoothed_flip_count: int
+
+
+def compute_device_acceptance(
+    device_id: str,
+    rows: list[AlignedPoint],
+    segments: list[list[AlignedPoint]],
+    config: PluginConfig,
+) -> DeviceAcceptanceResult:
+    """计算单个 device 的验收指标与违规点。"""
+    dt_values = estimate_release_dt_values(rows)
+    latency_values = estimate_release_latencies(rows, config)
+
+    global_offset_values: list[float] = []
+    normal_offset_values: list[float] = []
+    recovery_points: list[int] = []
+    normal_offset_violations: list[dict[str, object]] = []
+    recovery_violations: list[dict[str, object]] = []
+    latency_violations: list[dict[str, object]] = []
+
+    for segment in segments:
+        offsets = [offset_m(point) for point in segment]
+        jump_tags = jump_exclusion_mask(segment, config)
+        global_offset_values.extend(offsets)
+        normal_offset_values.extend(
+            offset for offset, excluded in zip(offsets, jump_tags)
+            if not excluded)
+        normal_offset_violations.extend(
+            {
+                "eventTime": point.event_time_text,
+                "deviceId": device_id,
+                "metric": "normal_point_offset_p95_m",
+                "value": round(offset, 4),
+                "line_no": point.line_no,
+            }
+            for point, offset, excluded in zip(segment, offsets, jump_tags)
+            if not excluded)
+
+        segment_recoveries = recovery_measurements(segment, offsets, config)
+        recovery_points.extend(
+            value["recovery_points"] for value in segment_recoveries)
+        recovery_violations.extend({
+            "eventTime": value["eventTime"],
+            "deviceId": device_id,
+            "metric": "recovery_points_p95",
+            "value": value["recovery_points"],
+            "line_no": value["line_no"],
+        } for value in segment_recoveries)
+
+    raw_flip_count = count_direction_flips(rows, use_smoothed=False)
+    smoothed_flip_count = count_direction_flips(rows, use_smoothed=True)
+
+    point_count = sum(len(segment) for segment in segments)
+    dt_stats = distribution(dt_values, include_max=True)
+    latency_stats = distribution(latency_values, include_max=True)
+    normal_offset_stats = distribution(normal_offset_values, include_max=True)
+    global_offset_stats = distribution(global_offset_values, include_max=True)
+    recovery_stats = distribution(recovery_points,
+                                  include_max=True,
+                                  treat_as_int=True)
+    is_dense = (dt_stats["p95"] or
+                0.0) <= DENSE_DEVICE_DT_P95_THRESHOLD_S if dt_stats[
+                    "p95"] is not None else False
+    warning = (
+        "direction_flip_count exceeds raw_direction_flip_count on this device"
+        if smoothed_flip_count > raw_flip_count else None)
+
+    if point_count >= MIN_POINTS_FOR_HARD_GATE and normal_offset_stats[
+            "p95"] is not None:
+        if normal_offset_stats["p95"] > NORMAL_POINT_OFFSET_THRESHOLD_M:
+            latency_violations.extend([])
+
+    if point_count >= MIN_POINTS_FOR_HARD_GATE and normal_offset_stats[
+            "p95"] is not None:
+        if normal_offset_stats["p95"] > NORMAL_POINT_OFFSET_THRESHOLD_M:
+            top_normal_offset_violations = sorted(
+                normal_offset_violations,
+                key=lambda item: item["value"],
+                reverse=True,
+            )[:5]
+        else:
+            top_normal_offset_violations = []
+    else:
+        top_normal_offset_violations = []
+
+    if recovery_stats["p95"] is not None and recovery_stats[
+            "p95"] > RECOVERY_POINTS_THRESHOLD:
+        top_recovery_violations = sorted(
+            recovery_violations,
+            key=lambda item: item["value"],
+            reverse=True,
+        )[:5]
+    else:
+        top_recovery_violations = []
+
+    if is_dense:
+        dense_limit = dense_latency_limit(dt_stats["p95"], config)
+        if (latency_stats["median"] is not None and
+                latency_stats["median"] > 3.0):
+            latency_violations.extend({
+                "eventTime": rows[index].event_time_text,
+                "deviceId": device_id,
+                "metric": "release_latency_median_s",
+                "value": round(value, 4),
+                "line_no": rows[index].line_no,
+            } for index, value in enumerate(latency_values))
+        if latency_stats["p95"] is not None and latency_stats[
+                "p95"] > dense_limit:
+            latency_violations.extend({
+                "eventTime": rows[index].event_time_text,
+                "deviceId": device_id,
+                "metric": "release_latency_p95_s",
+                "value": round(value, 4),
+                "line_no": rows[index].line_no,
+            } for index, value in enumerate(latency_values))
+    else:
+        if latency_stats["max"] is not None and latency_stats[
+                "max"] > config.idle_flush_seconds:
+            latency_violations.extend({
+                "eventTime": rows[index].event_time_text,
+                "deviceId": device_id,
+                "metric": "release_latency_idle_flush_s",
+                "value": round(value, 4),
+                "line_no": rows[index].line_no,
+            } for index, value in enumerate(latency_values))
+
+    if latency_violations:
+        metric_name = latency_violations[0]["metric"]
+        top_latency_violations = sorted(
+            [
+                item for item in latency_violations
+                if item["metric"] == metric_name
+            ],
+            key=lambda item: item["value"],
+            reverse=True,
+        )[:5]
+    else:
+        top_latency_violations = []
+
+    summary = {
+        "point_count": point_count,
+        "dense_device": is_dense,
+        "hard_gate_applies": point_count >= MIN_POINTS_FOR_HARD_GATE,
+        "dt_median_s": dt_stats["median"],
+        "dt_p95_s": dt_stats["p95"],
+        "normal_point_count": len(normal_offset_values),
+        "normal_point_offset_p95_m": normal_offset_stats["p95"],
+        "global_offset_median_m": global_offset_stats["median"],
+        "global_offset_p75_m": global_offset_stats["p75"],
+        "global_offset_p95_m": global_offset_stats["p95"],
+        "global_offset_p99_m": global_offset_stats["p99"],
+        "recovery_points_p95": recovery_stats["p95"],
+        "raw_direction_flip_count": raw_flip_count,
+        "direction_flip_count": smoothed_flip_count,
+        "release_latency_median_s": latency_stats["median"],
+        "release_latency_p95_s": latency_stats["p95"],
+        "warning": warning,
+    }
+    return DeviceAcceptanceResult(
+        summary=summary,
+        violations=top_normal_offset_violations + top_recovery_violations +
+        top_latency_violations,
+        global_offset_values=global_offset_values,
+        normal_offset_values=normal_offset_values,
+        recovery_points=recovery_points,
+        raw_flip_count=raw_flip_count,
+        smoothed_flip_count=smoothed_flip_count,
+    )
+
+
+def estimate_release_dt_values(points: list[AlignedPoint]) -> list[float]:
+    """统计同一设备相邻点之间的时间间隔。"""
+    values: list[float] = []
+    for previous, current in zip(points, points[1:]):
+        delta = (current.event_time - previous.event_time).total_seconds()
+        if delta > 0.0:
+            values.append(delta)
+    return values
+
+
+def estimate_release_latencies(points: list[AlignedPoint],
+                               config: PluginConfig) -> list[float]:
+    """离线估算 fixed-lag 输出延迟。"""
+    values: list[float] = []
+    for index, point in enumerate(points):
+        candidate_index = index + config.lag_points
+        if candidate_index < len(points):
+            delta = (points[candidate_index].event_time -
+                     point.event_time).total_seconds()
+            values.append(min(max(delta, 0.0), config.idle_flush_seconds))
+        else:
+            values.append(config.idle_flush_seconds)
+    return values
+
+
+def jump_exclusion_mask(segment: list[AlignedPoint],
+                        config: PluginConfig) -> list[bool]:
+    """标记需要排除出正常点统计的跳变区间。"""
+    excluded = [False] * len(segment)
+    for index in range(1, len(segment)):
+        speed = raw_implied_speed(segment[index - 1], segment[index], config)
+        if speed <= JUMP_TAG_SPEED_MPS:
+            continue
+        stop = min(len(segment), index + NORMAL_POINT_EXCLUSION_AFTER + 1)
+        for tagged_index in range(index, stop):
+            excluded[tagged_index] = True
+    return excluded
+
+
+def recovery_measurements(
+    segment: list[AlignedPoint],
+    offsets: list[float],
+    config: PluginConfig,
+) -> list[dict[str, object]]:
+    """统计明显大跳变恢复到正常范围所需的点数。"""
+    measurements: list[dict[str, object]] = []
+    for index in range(1, len(segment)):
+        speed = raw_implied_speed(segment[index - 1], segment[index], config)
+        if speed <= RECOVERY_JUMP_SPEED_MPS:
+            continue
+        recovery_points = len(segment) - index
+        for candidate_index in range(index + 1, len(segment)):
+            if offsets[candidate_index] < RECOVERY_OFFSET_THRESHOLD_M:
+                recovery_points = candidate_index - index
+                break
+        measurements.append({
+            "line_no": segment[index].line_no,
+            "eventTime": segment[index].event_time_text,
+            "recovery_points": recovery_points,
+        })
+    return measurements
+
+
+def count_direction_flips(segment: list[AlignedPoint], *,
+                          use_smoothed: bool) -> int:
+    """统计一段轨迹中的高频折返次数。"""
+    return len(direction_flip_events(segment, use_smoothed=use_smoothed))
+
+
+def direction_flip_events(segment: list[AlignedPoint], *,
+                          use_smoothed: bool) -> list[float]:
+    """找出一段轨迹中所有满足条件的折返事件。"""
+    events: list[float] = []
+    for left, center, right in zip(segment, segment[1:], segment[2:]):
+        if use_smoothed:
+            left_xy = (left.smoothed_latitude, left.smoothed_longitude)
+            center_xy = (center.smoothed_latitude, center.smoothed_longitude)
+            right_xy = (right.smoothed_latitude, right.smoothed_longitude)
+        else:
+            left_xy = (left.raw_latitude, left.raw_longitude)
+            center_xy = (center.raw_latitude, center.raw_longitude)
+            right_xy = (right.raw_latitude, right.raw_longitude)
+
+        if None in left_xy or None in center_xy or None in right_xy:
+            continue
+
+        ab = vector_m(left_xy[0], left_xy[1], center_xy[0], center_xy[1])
+        bc = vector_m(center_xy[0], center_xy[1], right_xy[0], right_xy[1])
+        ab_norm = math.hypot(*ab)
+        bc_norm = math.hypot(*bc)
+        if (ab_norm <= DIRECTION_FLIP_MIN_STEP_M or
+                bc_norm <= DIRECTION_FLIP_MIN_STEP_M):
+            continue
+
+        angle_deg = vector_angle_deg(ab, bc)
+        if angle_deg > DIRECTION_FLIP_ANGLE_DEG:
+            events.append(angle_deg)
+    return events
+
+
+def offset_m(point: AlignedPoint) -> float:
+    """计算单个点 raw 与 smoothed 之间的距离。"""
+    return haversine_m(
+        point.raw_latitude,
+        point.raw_longitude,
+        point.smoothed_latitude,
+        point.smoothed_longitude,
+    )
+
+
+def raw_implied_speed(previous: AlignedPoint, current: AlignedPoint,
+                      config: PluginConfig) -> float:
+    """按原始相邻点估算隐含速度。"""
+    distance = haversine_m(
+        previous.raw_latitude,
+        previous.raw_longitude,
+        current.raw_latitude,
+        current.raw_longitude,
+    )
+    delta = (current.event_time - previous.event_time).total_seconds()
+    dt_eff = max(delta, config.min_dt_seconds)
+    return distance / dt_eff
+
+
+def dense_latency_limit(dt_p95: float | None, config: PluginConfig) -> float:
+    """给稠密设备计算允许的延迟上限。"""
+    if dt_p95 is None:
+        return float(config.idle_flush_seconds)
+    return config.lag_points * dt_p95

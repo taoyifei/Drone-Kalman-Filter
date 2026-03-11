@@ -1,3 +1,5 @@
+"""实时逐条轨迹平滑插件。"""
+
 from __future__ import annotations
 
 import json
@@ -5,14 +7,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .config import PluginConfig
-from .message import ParsedMessage, TrackKey, dump_message, parse_message
-from .prefilter import RobustPrefilterSegmentSmoother
-from .segment import SegmentSmoother
+from drone_kalman_filter.config import PluginConfig
+from drone_kalman_filter.message import (
+    ParsedMessage,
+    TrackKey,
+    dump_message,
+    parse_message,
+)
+from drone_kalman_filter.prefilter import RobustPrefilterSegmentSmoother
+from drone_kalman_filter.segment import SegmentSmoother
 
 
 @dataclass(slots=True)
 class TrackState:
+    """保存单条活跃轨迹段的运行时状态。"""
+
     # 每条活跃轨迹段的运行时状态。
     segment: SegmentSmoother | RobustPrefilterSegmentSmoother
     last_event_time: datetime
@@ -21,7 +30,10 @@ class TrackState:
 
 
 class DroneKalmanFilterPlugin:
+    """提供逐条输入、逐条输出的实时平滑插件。"""
+
     def __init__(self, config: PluginConfig | None = None) -> None:
+        """初始化插件状态和输出保序队列。"""
         self.config = config or PluginConfig()
         self._tracks: dict[TrackKey, TrackState] = {}
         # 所有平滑输出先进入待发布队列，再按输入序号统一释放，避免多设备交错时乱序。
@@ -30,6 +42,7 @@ class DroneKalmanFilterPlugin:
         self._next_release_seq = 1
 
     def process(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+        """处理一条消息并返回当前已经成熟的输出。"""
         parsed = parse_message(self._next_input_seq, message)
         self._next_input_seq += 1
 
@@ -65,6 +78,7 @@ class DroneKalmanFilterPlugin:
         return self._release_ready()
 
     def process_json_line(self, line: str) -> list[str]:
+        """处理一行 JSONL 文本并返回成熟输出。"""
         stripped = line.strip()
         if not stripped:
             return []
@@ -72,14 +86,18 @@ class DroneKalmanFilterPlugin:
         return [dump_message(item) for item in self.process(payload)]
 
     def flush(self) -> list[dict[str, Any]]:
+        """主动刷新所有未结束轨迹段的剩余输出。"""
         for key in list(self._tracks):
             self._flush_track(key)
         return self._release_ready()
 
     def flush_json(self) -> list[str]:
+        """以 JSONL 形式返回 flush 结果。"""
         return [dump_message(item) for item in self.flush()]
 
-    def _starts_new_segment(self, state: TrackState, parsed: ParsedMessage) -> bool:
+    def _starts_new_segment(self, state: TrackState,
+                            parsed: ParsedMessage) -> bool:
+        """判断当前点是否需要开启新的轨迹段。"""
         if state.trace_id != parsed.trace_id:
             return True
         delta = (parsed.event_time - state.last_event_time).total_seconds()
@@ -88,6 +106,7 @@ class DroneKalmanFilterPlugin:
         return delta > self.config.max_segment_gap_seconds
 
     def _flush_idle_tracks(self, current_time: datetime | None) -> None:
+        """刷新长时间未更新的轨迹段。"""
         if current_time is None:
             return
 
@@ -102,13 +121,17 @@ class DroneKalmanFilterPlugin:
             self._flush_track(key)
 
     def _flush_track(self, key: TrackKey) -> None:
+        """刷新并移除指定轨迹段。"""
         state = self._tracks.pop(key, None)
         if state is None:
             return
         for seq, message in state.segment.flush():
             self._queue_output(seq, message)
 
-    def _create_segment_smoother(self, parsed: ParsedMessage) -> SegmentSmoother | RobustPrefilterSegmentSmoother:
+    def _create_segment_smoother(
+        self, parsed: ParsedMessage
+    ) -> SegmentSmoother | RobustPrefilterSegmentSmoother:
+        """按配置创建当前段使用的平滑器。"""
         kwargs = {
             "trace_id": parsed.trace_id,
             "config": self.config,
@@ -120,11 +143,13 @@ class DroneKalmanFilterPlugin:
         return SegmentSmoother(**kwargs)
 
     def _queue_output(self, arrival_seq: int, message: dict[str, Any]) -> None:
+        """把成熟输出放入待发布队列。"""
         if arrival_seq in self._pending_outputs:
             raise ValueError(f"duplicate output for arrival_seq={arrival_seq}")
         self._pending_outputs[arrival_seq] = message
 
     def _release_ready(self) -> list[dict[str, Any]]:
+        """按输入顺序释放已经成熟的输出。"""
         released: list[dict[str, Any]] = []
         # 只有最早未释放的序号已经成熟，才允许真正对外输出。
         while self._next_release_seq in self._pending_outputs:
