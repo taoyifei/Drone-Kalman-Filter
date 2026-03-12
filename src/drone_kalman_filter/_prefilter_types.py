@@ -23,7 +23,14 @@ class Suspicion:
 
     @property
     def is_suspicious(self) -> bool:
-        """判断当前分类结果是否需要触发修复。"""
+        """判断当前分类结果是否需要触发修复。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            bool: 当前分类是否应视为可疑。
+        """
         return self.hard_jump or self.bridge_spike
 
 

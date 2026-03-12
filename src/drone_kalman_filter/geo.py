@@ -18,7 +18,14 @@ class LocalTangentPlane:
     _cos_origin_lat: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        """预计算局部坐标转换需要的常量。"""
+        """预计算局部坐标转换需要的常量。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            None: 不返回值。
+        """
         object.__setattr__(self, "_origin_lat_rad",
                            math.radians(self.origin_lat_deg))
         object.__setattr__(self, "_cos_origin_lat",
@@ -26,7 +33,15 @@ class LocalTangentPlane:
 
     def to_local(self, latitude_deg: float,
                  longitude_deg: float) -> tuple[float, float]:
-        """把经纬度转换成局部平面坐标。"""
+        """把经纬度转换成局部平面坐标。
+
+        Args:
+            latitude_deg: 纬度，单位为度。
+            longitude_deg: 经度，单位为度。
+
+        Returns:
+            tuple[float, float]: 对应的局部东、北向坐标。
+        """
         # 不直接在经纬度上做滤波，先映射到局部平面，数值会更稳定。
         east = math.radians(longitude_deg - self.origin_lon_deg
                            ) * EARTH_RADIUS_M * self._cos_origin_lat
@@ -35,7 +50,15 @@ class LocalTangentPlane:
         return east, north
 
     def to_geodetic(self, east_m: float, north_m: float) -> tuple[float, float]:
-        """把局部平面坐标还原成经纬度。"""
+        """把局部平面坐标还原成经纬度。
+
+        Args:
+            east_m: 局部平面东向坐标，单位为米。
+            north_m: 局部平面北向坐标，单位为米。
+
+        Returns:
+            tuple[float, float]: 对应的地理坐标。
+        """
         latitude_deg = self.origin_lat_deg + math.degrees(
             north_m / EARTH_RADIUS_M)
         longitude_scale = EARTH_RADIUS_M * self._cos_origin_lat

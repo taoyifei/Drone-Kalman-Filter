@@ -26,7 +26,16 @@ def smooth_positions(
     plane: LocalTangentPlane,
     config: PluginConfig,
 ) -> list[SmoothedPosition]:
-    """对一段观测做前向 Kalman 和后向 RTS 平滑。"""
+    """对一段观测做前向 Kalman 和后向 RTS 平滑。
+
+    Args:
+        observations: 观测消息序列。
+        plane: 局部切平面坐标系。
+        config: 插件配置。
+
+    Returns:
+        list[SmoothedPosition]: 平滑后的位置结果序列。
+    """
     if not observations:
         return []
 

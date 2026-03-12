@@ -39,7 +39,17 @@ class PluginConfig:
     prefilter_median_window_size: int = 3
 
     def __post_init__(self) -> None:
-        """校验配置项组合是否合法。"""
+        """校验配置项组合是否合法。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            None: 不返回值。
+
+        Raises:
+            ValueError: 当配置组合非法或参数超出约束时抛出。
+        """
         # 这里集中做参数防御，避免运行时出现难排查的配置组合错误。
         if self.smoother_mode not in {"kalman", "robust_prefilter_kalman"}:
             raise ValueError(
@@ -113,20 +123,57 @@ class PluginConfig:
 
 
 def _validate_positive(name: str, value: float) -> None:
-    """校验数值必须为正。"""
+    """校验数值必须为正。
+
+    Args:
+        name: 配置项名称。
+        value: 输入值。
+
+    Returns:
+        None: 不返回值。
+
+    Raises:
+        ValueError: 当参数值不是正数时抛出。
+    """
     if value <= 0:
         raise ValueError(f"{name} must be positive")
 
 
 def _validate_minimum(name: str, value: float, *, minimum: float,
                       message: str) -> None:
-    """校验数值必须不小于给定下限。"""
+    """校验数值必须不小于给定下限。
+
+    Args:
+        name: 配置项名称。
+        value: 输入值。
+        minimum: 允许的最小值。
+        message: 校验失败时抛出的错误消息。
+
+    Returns:
+        None: 不返回值。
+
+    Raises:
+        ValueError: 当参数值小于允许的最小值时抛出。
+    """
     if value < minimum:
         raise ValueError(message)
 
 
 def _validate_window_relation(lag_name: str, lag_value: int, window_name: str,
                               window_value: int) -> None:
-    """校验滞后点数必须小于窗口大小。"""
+    """校验滞后点数必须小于窗口大小。
+
+    Args:
+        lag_name: 滞后参数名称。
+        lag_value: 滞后参数值。
+        window_name: 窗口参数名称。
+        window_value: 窗口参数值。
+
+    Returns:
+        None: 不返回值。
+
+    Raises:
+        ValueError: 当滞后窗口不小于主窗口时抛出。
+    """
     if lag_value >= window_value:
         raise ValueError(f"{lag_name} must be smaller than {window_name}")

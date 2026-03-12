@@ -24,7 +24,17 @@ class SegmentSmoother:
 
     def __init__(self, trace_id: str | None, config: PluginConfig,
                  anchor_latitude: float, anchor_longitude: float) -> None:
-        """初始化单段 fixed-lag 平滑器。"""
+        """初始化单段 fixed-lag 平滑器。
+
+        Args:
+            trace_id: 轨迹标识。
+            config: 插件配置。
+            anchor_latitude: 局部切平面锚点的纬度。
+            anchor_longitude: 局部切平面锚点的经度。
+
+        Returns:
+            None: 不返回值。
+        """
         self.trace_id = trace_id
         self.config = config
         self.plane = LocalTangentPlane(anchor_latitude, anchor_longitude)
@@ -32,7 +42,14 @@ class SegmentSmoother:
         self.buffer: deque[BufferedObservation] = deque()
 
     def append(self, parsed: ParsedMessage) -> list[tuple[int, dict]]:
-        """向当前段追加一个点并尝试释放成熟输出。"""
+        """向当前段追加一个点并尝试释放成熟输出。
+
+        Args:
+            parsed: 标准化后的消息对象。
+
+        Returns:
+            list[tuple[int, dict]]: 当前已成熟的输出序号与消息列表。
+        """
         while len(
                 self.buffer
         ) >= self.config.window_size and self.buffer and self.buffer[0].emitted:
@@ -42,7 +59,14 @@ class SegmentSmoother:
         return self._emit_mature_observation()
 
     def flush(self) -> list[tuple[int, dict]]:
-        """在切段或流结束时补齐缓冲区剩余输出。"""
+        """在切段或流结束时补齐缓冲区剩余输出。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            list[tuple[int, dict]]: 当前缓冲区剩余的输出序号与消息列表。
+        """
         if not self.buffer:
             return []
 
@@ -60,7 +84,14 @@ class SegmentSmoother:
         return outputs
 
     def _emit_mature_observation(self) -> list[tuple[int, dict]]:
-        """按固定滞后规则释放当前窗口中的成熟点。"""
+        """按固定滞后规则释放当前窗口中的成熟点。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            list[tuple[int, dict]]: 当前已成熟的输出序号与消息列表。
+        """
         if len(self.buffer) <= self.config.lag_points:
             return []
 
@@ -79,7 +110,15 @@ class SegmentSmoother:
         ]
 
     def _materialize(self, index: int, smoothed_position) -> tuple[int, dict]:
-        """把局部平滑结果回写成业务消息。"""
+        """把局部平滑结果回写成业务消息。
+
+        Args:
+            index: 目标元素在序列或缓冲区中的索引。
+            smoothed_position: 平滑后的位置结果。
+
+        Returns:
+            tuple[int, dict]: 生成的结果元组。
+        """
         item = self.buffer[index]
         latitude, longitude = self.plane.to_geodetic(smoothed_position.east_m,
                                                      smoothed_position.north_m)

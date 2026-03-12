@@ -29,7 +29,14 @@ class AlignedPoint:
 
     @property
     def has_valid_coordinates(self) -> bool:
-        """判断对齐后的 raw 和 smoothed 是否都有可用坐标。"""
+        """判断对齐后的 raw 和 smoothed 是否都有可用坐标。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            bool: 坐标字段是否完整且可用。
+        """
         return (self.raw_latitude is not None and
                 self.raw_longitude is not None and
                 self.smoothed_latitude is not None and
@@ -42,7 +49,18 @@ class AcceptanceError(ValueError):
 
 def load_aligned_points(raw_path: str | Path,
                         smoothed_path: str | Path) -> list[AlignedPoint]:
-    """逐行读取并对齐 raw 与 smoothed 数据。"""
+    """逐行读取并对齐 raw 与 smoothed 数据。
+
+    Args:
+        raw_path: 原始 JSONL 文件路径。
+        smoothed_path: 平滑后 JSONL 文件路径。
+
+    Returns:
+        list[AlignedPoint]: 按行对齐后的点列表。
+
+    Raises:
+        AcceptanceError: 当 raw 与 smoothed 文件无法逐行对齐时抛出。
+    """
     raw_lines = Path(raw_path).read_text(encoding="utf-8").splitlines()
     smoothed_lines = Path(smoothed_path).read_text(
         encoding="utf-8").splitlines()
@@ -103,7 +121,14 @@ def load_aligned_points(raw_path: str | Path,
 
 def group_points_by_device(
         points: list[AlignedPoint]) -> dict[str, list[AlignedPoint]]:
-    """按 deviceId 分组有效点。"""
+    """按 deviceId 分组有效点。
+
+    Args:
+        points: 点序列。
+
+    Returns:
+        dict[str, list[AlignedPoint]]: 按设备分组后的点集合。
+    """
     grouped: dict[str, list[AlignedPoint]] = defaultdict(list)
     for point in points:
         if point.device_id is None or not point.has_valid_coordinates:
@@ -117,7 +142,14 @@ def group_points_by_device(
 def group_points_by_track(
         points: list[AlignedPoint]
 ) -> dict[tuple[str, str], list[AlignedPoint]]:
-    """按 targetId 和 deviceId 分组有效点。"""
+    """按 targetId 和 deviceId 分组有效点。
+
+    Args:
+        points: 点序列。
+
+    Returns:
+        dict[tuple[str, str], list[AlignedPoint]]: 按轨迹分组后的点集合。
+    """
     grouped: dict[tuple[str, str], list[AlignedPoint]] = defaultdict(list)
     for point in points:
         if (point.device_id is None or point.target_id is None or
@@ -133,7 +165,15 @@ def split_segments_by_device(
     tracks: dict[tuple[str, str], list[AlignedPoint]],
     config: PluginConfig,
 ) -> dict[str, list[list[AlignedPoint]]]:
-    """按实时主链路同样的规则把轨迹切成连续段。"""
+    """按实时主链路同样的规则把轨迹切成连续段。
+
+    Args:
+        tracks: 按轨迹分组后的点集合。
+        config: 插件配置。
+
+    Returns:
+        dict[str, list[list[AlignedPoint]]]: 按设备和间断切分后的片段。
+    """
     by_device: dict[str, list[list[AlignedPoint]]] = defaultdict(list)
     for (_, device_id), points in tracks.items():
         current: list[AlignedPoint] = []
@@ -155,7 +195,14 @@ def split_segments_by_device(
 
 
 def device_dt_values(points: list[AlignedPoint]) -> list[float]:
-    """统计同一设备相邻点之间的时间间隔。"""
+    """统计同一设备相邻点之间的时间间隔。
+
+    Args:
+        points: 点序列。
+
+    Returns:
+        list[float]: 设备内部相邻点的时间间隔列表。
+    """
     values: list[float] = []
     for previous, current in zip(points, points[1:]):
         delta = (current.event_time - previous.event_time).total_seconds()

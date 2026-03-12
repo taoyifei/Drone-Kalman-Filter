@@ -27,7 +27,17 @@ class RobustPrefilterSegmentSmoother:
 
     def __init__(self, trace_id: str | None, config: PluginConfig,
                  anchor_latitude: float, anchor_longitude: float) -> None:
-        """初始化带鲁棒预处理的单段平滑器。"""
+        """初始化带鲁棒预处理的单段平滑器。
+
+        Args:
+            trace_id: 轨迹标识。
+            config: 插件配置。
+            anchor_latitude: 局部切平面锚点的纬度。
+            anchor_longitude: 局部切平面锚点的经度。
+
+        Returns:
+            None: 不返回值。
+        """
         self.trace_id = trace_id
         self.config = config
         self.plane = LocalTangentPlane(anchor_latitude, anchor_longitude)
@@ -37,7 +47,14 @@ class RobustPrefilterSegmentSmoother:
         self._burst_cooldown = 0
 
     def append(self, parsed: ParsedMessage) -> list[tuple[int, dict]]:
-        """追加一个点并尝试输出成熟结果。"""
+        """追加一个点并尝试输出成熟结果。
+
+        Args:
+            parsed: 标准化后的消息对象。
+
+        Returns:
+            list[tuple[int, dict]]: 当前已成熟的输出序号与消息列表。
+        """
         while (len(self.buffer) >= self.config.prefilter_window_size and
                self.buffer and self.buffer[0].emitted):
             self.buffer.popleft()
@@ -46,7 +63,14 @@ class RobustPrefilterSegmentSmoother:
         return self._emit_mature_observation()
 
     def flush(self) -> list[tuple[int, dict]]:
-        """在切段或流结束时补齐所有剩余输出。"""
+        """在切段或流结束时补齐所有剩余输出。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            list[tuple[int, dict]]: 当前缓冲区剩余的输出序号与消息列表。
+        """
         if not self.buffer:
             return []
 
@@ -74,7 +98,14 @@ class RobustPrefilterSegmentSmoother:
         return outputs
 
     def _emit_mature_observation(self) -> list[tuple[int, dict]]:
-        """按固定滞后规则释放一个成熟点。"""
+        """按固定滞后规则释放一个成熟点。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            list[tuple[int, dict]]: 当前已成熟的输出序号与消息列表。
+        """
         if len(self.buffer) <= self.config.prefilter_lag_points:
             return []
 
@@ -107,7 +138,16 @@ class RobustPrefilterSegmentSmoother:
         self,
     ) -> tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool,
                list[SmoothedPosition]]:
-        """生成修复后的观测并完成窗口内平滑。"""
+        """生成修复后的观测并完成窗口内平滑。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool, list[SmoothedPosition]]: 修复后的观测、修复点、可锚定标记、是否走
+                                                                                                    burst
+                                                                                                    路径以及平滑结果。
+        """
         (
             repaired_observations,
             repaired_points,
@@ -127,7 +167,16 @@ class RobustPrefilterSegmentSmoother:
     def _repaired_observations(
             self
     ) -> tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool]:
-        """根据当前窗口生成修复后的观测序列。"""
+        """根据当前窗口生成修复后的观测序列。
+
+        Args:
+            None. 不接收额外参数。
+
+        Returns:
+            tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool]: 修复后的观测、输出点、可锚定标记以及是否走
+                                                                            burst
+                                                                            路径。
+        """
         observations = [item.parsed for item in self.buffer]
         if len(observations) <= 1:
             raw_points = [
@@ -195,7 +244,15 @@ class RobustPrefilterSegmentSmoother:
 
     def _materialize(self, index: int,
                      smoothed_position: SmoothedPosition) -> tuple[int, dict]:
-        """把局部平滑结果回写成业务消息。"""
+        """把局部平滑结果回写成业务消息。
+
+        Args:
+            index: 目标元素在序列或缓冲区中的索引。
+            smoothed_position: 平滑后的位置结果。
+
+        Returns:
+            tuple[int, dict]: 生成的结果元组。
+        """
         item = self.buffer[index]
         latitude, longitude = self.plane.to_geodetic(smoothed_position.east_m,
                                                      smoothed_position.north_m)
@@ -203,7 +260,14 @@ class RobustPrefilterSegmentSmoother:
         return item.parsed.arrival_seq, message
 
     def _update_burst_cooldown(self, used_burst_path: bool) -> None:
-        """更新 burst 路径的短期冷却状态。"""
+        """更新 burst 路径的短期冷却状态。
+
+        Args:
+            used_burst_path: 是否采用 burst 修复路径。
+
+        Returns:
+            None: 不返回值。
+        """
         if used_burst_path:
             self._burst_cooldown = self.config.prefilter_burst_max_run_length
         elif self._burst_cooldown > 0:

@@ -26,7 +26,14 @@ from drone_kalman_filter._metrics_statistics import (
 
 
 def build_report(path: str | Path) -> dict[str, Any]:
-    """统计单个 JSONL 文件的基础运动指标。"""
+    """统计单个 JSONL 文件的基础运动指标。
+
+    Args:
+        path: 输入文件路径。
+
+    Returns:
+        dict[str, Any]: 轨迹统计报告。
+    """
     rows_by_track: dict[tuple[str, str, str | None],
                         list[dict[str, Any]]] = defaultdict(list)
     total_messages = 0
@@ -93,7 +100,16 @@ def compute_acceptance_metrics(
     smoothed_path: str | Path,
     config: PluginConfig,
 ) -> dict[str, Any]:
-    """计算 raw 与 smoothed 的前端导向验收指标。"""
+    """计算 raw 与 smoothed 的前端导向验收指标。
+
+    Args:
+        raw_path: 原始 JSONL 文件路径。
+        smoothed_path: 平滑后 JSONL 文件路径。
+        config: 插件配置。
+
+    Returns:
+        dict[str, Any]: raw 与 smoothed 的验收指标。
+    """
     points = _load_aligned_points(raw_path, smoothed_path)
     device_rows = _group_points_by_device(points)
     device_segments = _split_segments_by_device(_group_points_by_track(points),
@@ -161,7 +177,17 @@ def write_acceptance_summary(
     output_path: str | Path,
     config: PluginConfig,
 ) -> dict[str, Any]:
-    """生成并写出验收摘要文件。"""
+    """生成并写出验收摘要文件。
+
+    Args:
+        raw_path: 原始 JSONL 文件路径。
+        smoothed_path: 平滑后 JSONL 文件路径。
+        output_path: 输出文件路径。
+        config: 插件配置。
+
+    Returns:
+        dict[str, Any]: 已写入磁盘的验收摘要。
+    """
     summary = compute_acceptance_metrics(raw_path, smoothed_path, config)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)

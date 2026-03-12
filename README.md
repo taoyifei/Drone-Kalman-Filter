@@ -14,7 +14,7 @@
 - `drone_kalman_visualization`：最直观的原始轨迹 / 平滑轨迹对比图
 
 详细算法与公式说明见：
-- [技术实现说明.md](D:/Github/Drone-Kalman-Filter/docs/技术实现说明.md)
+- 技术实现说明.md
 
 代码目录上：
 - `src/` 里只放实时主链路

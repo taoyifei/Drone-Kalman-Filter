@@ -29,7 +29,17 @@ def has_burst_candidate(
     config: PluginConfig,
     seed_anchor: TrustedAnchor | None,
 ) -> bool:
-    """判断当前窗口是否值得切到 burst 修复路径。"""
+    """判断当前窗口是否值得切到 burst 修复路径。
+
+    Args:
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        bool: 当前窗口是否存在 burst 修复候选。
+    """
     if len(raw_points) < 3:
         return False
 
@@ -96,7 +106,17 @@ def repair_points_burst(
     *,
     seed_anchor: TrustedAnchor | None = None,
 ) -> tuple[list[LocalPoint], bool, list[bool]]:
-    """按 burst 规则修复连续异常点。"""
+    """按 burst 规则修复连续异常点。
+
+    Args:
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        tuple[list[LocalPoint], bool, list[bool]]: burst 路径下的修复结果、是否发生修复以及改动标记。
+    """
     repaired: list[LocalPoint] = []
     repaired_times: list[datetime] = []
     altered_flags: list[bool] = []
@@ -226,7 +246,20 @@ def find_future_anchor(
     raw_points: list[LocalPoint],
     config: PluginConfig,
 ) -> BurstAnchor:
-    """在窗口内寻找可用于 burst 修复的未来稳定锚点。"""
+    """在窗口内寻找可用于 burst 修复的未来稳定锚点。
+
+    Args:
+        start_index: 连续可疑区间的起始索引。
+        current_run_end: 当前连续可疑区间的结束索引。
+        anchor_point: 用于判断或修复的参考锚点。
+        anchor_time: 参考锚点对应的事件时间。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+
+    Returns:
+        BurstAnchor: 为 burst 修复找到的未来锚点。
+    """
     repair_end = current_run_end
     search_limit = min(
         len(raw_points) - 1,
@@ -269,7 +302,17 @@ def qualifies_as_burst(
     start_index: int,
     run_end: int,
 ) -> bool:
-    """判断一串连续可疑点是否满足 burst 条件。"""
+    """判断一串连续可疑点是否满足 burst 条件。
+
+    Args:
+        anchor_point: 用于判断或修复的参考锚点。
+        raw_points: 原始局部坐标点序列。
+        start_index: 连续可疑区间的起始索引。
+        run_end: 连续可疑区间的结束索引。
+
+    Returns:
+        bool: 指定区间是否满足 burst 条件。
+    """
     if run_end <= start_index:
         return False
 
@@ -299,7 +342,21 @@ def repair_single_point(
     anchor_time: datetime,
     config: PluginConfig,
 ) -> LocalPoint:
-    """按新路径修复一个单独的异常点。"""
+    """按新路径修复一个单独的异常点。
+
+    Args:
+        index: 目标元素在序列或缓冲区中的索引。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        repaired_points: 修复后的局部坐标点序列。
+        repaired_times: 修复点对应的时间序列。
+        anchor_point: 用于判断或修复的参考锚点。
+        anchor_time: 参考锚点对应的事件时间。
+        config: 插件配置。
+
+    Returns:
+        LocalPoint: 单个可疑点的修复结果。
+    """
     if index < len(raw_points) - 1:
         next_raw_point = raw_points[index + 1]
         if distance(anchor_point,
@@ -338,7 +395,19 @@ def classify_suspicion(
     raw_points: list[LocalPoint],
     config: PluginConfig,
 ) -> Suspicion:
-    """相对可信锚点给当前点做异常分类。"""
+    """相对可信锚点给当前点做异常分类。
+
+    Args:
+        anchor_point: 用于判断或修复的参考锚点。
+        anchor_time: 参考锚点对应的事件时间。
+        index: 目标元素在序列或缓冲区中的索引。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+
+    Returns:
+        Suspicion: 当前点的可疑性分类结果。
+    """
     raw_point = raw_points[index]
     dt = max((observations[index].event_time - anchor_time).total_seconds(),
              config.min_dt_seconds)
@@ -368,7 +437,19 @@ def is_bridge_spike_from_anchor(
     index: int,
     config: PluginConfig,
 ) -> bool:
-    """判断当前点相对可信锚点是否构成桥接尖刺。"""
+    """判断当前点相对可信锚点是否构成桥接尖刺。
+
+    Args:
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        anchor_point: 用于判断或修复的参考锚点。
+        anchor_time: 参考锚点对应的事件时间。
+        index: 目标元素在序列或缓冲区中的索引。
+        config: 插件配置。
+
+    Returns:
+        bool: 当前点是否为基于锚点判断的桥接尖刺。
+    """
     if index >= len(raw_points) - 1:
         return False
 

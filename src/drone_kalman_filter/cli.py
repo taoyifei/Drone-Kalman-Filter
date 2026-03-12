@@ -14,7 +14,14 @@ _DEFAULT_CONFIG = PluginConfig()
 
 
 def main() -> int:
-    """解析命令行参数并分发到对应子命令。"""
+    """解析命令行参数并分发到对应子命令。
+
+    Args:
+        None. 不接收额外参数。
+
+    Returns:
+        int: 进程退出码。
+    """
     parser = argparse.ArgumentParser(
         description="Kalman smoother for DetectionTarget JSONL streams.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -57,7 +64,14 @@ def main() -> int:
 
 
 def _run_smooth(args: argparse.Namespace) -> int:
-    """按给定配置平滑输入 JSONL 并写出结果。"""
+    """按给定配置平滑输入 JSONL 并写出结果。
+
+    Args:
+        args: 命令行解析后的参数对象。
+
+    Returns:
+        int: 进程退出码。
+    """
     # smooth 命令直接把 JSONL 逐行喂给实时插件，因此和真实接流的行为是一致的。
     config = PluginConfig(
         smoother_mode=args.smoother_mode,
@@ -102,14 +116,28 @@ def _run_smooth(args: argparse.Namespace) -> int:
 
 
 def _run_report(args: argparse.Namespace) -> int:
-    """输出单个 JSONL 文件的基础统计报告。"""
+    """输出单个 JSONL 文件的基础统计报告。
+
+    Args:
+        args: 命令行解析后的参数对象。
+
+    Returns:
+        int: 进程退出码。
+    """
     report = build_report(args.input)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
 
 def _run_acceptance(args: argparse.Namespace) -> int:
-    """生成 raw 与 smoothed 的验收指标摘要。"""
+    """生成 raw 与 smoothed 的验收指标摘要。
+
+    Args:
+        args: 命令行解析后的参数对象。
+
+    Returns:
+        int: 进程退出码。
+    """
     # acceptance 只做离线验收，不会改任何业务输出文件。
     config = PluginConfig(
         lag_points=args.lag_points,
@@ -128,7 +156,14 @@ def _run_acceptance(args: argparse.Namespace) -> int:
 
 
 def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
-    """为 smooth 子命令补充可调的运行参数。"""
+    """为 smooth 子命令补充可调的运行参数。
+
+    Args:
+        parser: 命令行参数解析器。
+
+    Returns:
+        None: 不返回值。
+    """
     parser.add_argument("--smoother-mode",
                         choices=["kalman", "robust_prefilter_kalman"],
                         default=_DEFAULT_CONFIG.smoother_mode)

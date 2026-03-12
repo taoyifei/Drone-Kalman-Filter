@@ -45,7 +45,17 @@ def compute_device_acceptance(
     segments: list[list[AlignedPoint]],
     config: PluginConfig,
 ) -> DeviceAcceptanceResult:
-    """计算单个 device 的验收指标与违规点。"""
+    """计算单个 device 的验收指标与违规点。
+
+    Args:
+        device_id: 设备标识。
+        rows: 当前设备对应的对齐点序列。
+        segments: 按轨迹切分后的片段序列。
+        config: 插件配置。
+
+    Returns:
+        DeviceAcceptanceResult: 单设备的验收结果。
+    """
     dt_values = estimate_release_dt_values(rows)
     latency_values = estimate_release_latencies(rows, config)
 
@@ -207,7 +217,14 @@ def compute_device_acceptance(
 
 
 def estimate_release_dt_values(points: list[AlignedPoint]) -> list[float]:
-    """统计同一设备相邻点之间的时间间隔。"""
+    """统计同一设备相邻点之间的时间间隔。
+
+    Args:
+        points: 点序列。
+
+    Returns:
+        list[float]: 释放输出之间的时间间隔列表。
+    """
     values: list[float] = []
     for previous, current in zip(points, points[1:]):
         delta = (current.event_time - previous.event_time).total_seconds()
@@ -218,7 +235,15 @@ def estimate_release_dt_values(points: list[AlignedPoint]) -> list[float]:
 
 def estimate_release_latencies(points: list[AlignedPoint],
                                config: PluginConfig) -> list[float]:
-    """离线估算 fixed-lag 输出延迟。"""
+    """离线估算 fixed-lag 输出延迟。
+
+    Args:
+        points: 点序列。
+        config: 插件配置。
+
+    Returns:
+        list[float]: 估计得到的输出延迟列表。
+    """
     values: list[float] = []
     for index, point in enumerate(points):
         candidate_index = index + config.lag_points
@@ -233,7 +258,15 @@ def estimate_release_latencies(points: list[AlignedPoint],
 
 def jump_exclusion_mask(segment: list[AlignedPoint],
                         config: PluginConfig) -> list[bool]:
-    """标记需要排除出正常点统计的跳变区间。"""
+    """标记需要排除出正常点统计的跳变区间。
+
+    Args:
+        segment: 单个轨迹片段。
+        config: 插件配置。
+
+    Returns:
+        list[bool]: 需要排除的跳变点布尔掩码。
+    """
     excluded = [False] * len(segment)
     for index in range(1, len(segment)):
         speed = raw_implied_speed(segment[index - 1], segment[index], config)
@@ -250,7 +283,16 @@ def recovery_measurements(
     offsets: list[float],
     config: PluginConfig,
 ) -> list[dict[str, object]]:
-    """统计明显大跳变恢复到正常范围所需的点数。"""
+    """统计明显大跳变恢复到正常范围所需的点数。
+
+    Args:
+        segment: 单个轨迹片段。
+        offsets: 偏移量序列。
+        config: 插件配置。
+
+    Returns:
+        list[dict[str, object]]: 恢复阶段的诊断测量记录。
+    """
     measurements: list[dict[str, object]] = []
     for index in range(1, len(segment)):
         speed = raw_implied_speed(segment[index - 1], segment[index], config)
@@ -271,13 +313,29 @@ def recovery_measurements(
 
 def count_direction_flips(segment: list[AlignedPoint], *,
                           use_smoothed: bool) -> int:
-    """统计一段轨迹中的高频折返次数。"""
+    """统计一段轨迹中的高频折返次数。
+
+    Args:
+        segment: 单个轨迹片段。
+        use_smoothed: 是否使用平滑后坐标。
+
+    Returns:
+        int: 方向翻转次数。
+    """
     return len(direction_flip_events(segment, use_smoothed=use_smoothed))
 
 
 def direction_flip_events(segment: list[AlignedPoint], *,
                           use_smoothed: bool) -> list[float]:
-    """找出一段轨迹中所有满足条件的折返事件。"""
+    """找出一段轨迹中所有满足条件的折返事件。
+
+    Args:
+        segment: 单个轨迹片段。
+        use_smoothed: 是否使用平滑后坐标。
+
+    Returns:
+        list[float]: 发生方向翻转时的时间点列表。
+    """
     events: list[float] = []
     for left, center, right in zip(segment, segment[1:], segment[2:]):
         if use_smoothed:
@@ -307,7 +365,14 @@ def direction_flip_events(segment: list[AlignedPoint], *,
 
 
 def offset_m(point: AlignedPoint) -> float:
-    """计算单个点 raw 与 smoothed 之间的距离。"""
+    """计算单个点 raw 与 smoothed 之间的距离。
+
+    Args:
+        point: 单个点。
+
+    Returns:
+        float: 点相对基准的位移距离，单位为米。
+    """
     return haversine_m(
         point.raw_latitude,
         point.raw_longitude,
@@ -318,7 +383,16 @@ def offset_m(point: AlignedPoint) -> float:
 
 def raw_implied_speed(previous: AlignedPoint, current: AlignedPoint,
                       config: PluginConfig) -> float:
-    """按原始相邻点估算隐含速度。"""
+    """按原始相邻点估算隐含速度。
+
+    Args:
+        previous: 前一个观测或时间点。
+        current: 当前观测或时间点。
+        config: 插件配置。
+
+    Returns:
+        float: 原始点对推导出的速度，单位为米每秒。
+    """
     distance = haversine_m(
         previous.raw_latitude,
         previous.raw_longitude,
@@ -331,7 +405,15 @@ def raw_implied_speed(previous: AlignedPoint, current: AlignedPoint,
 
 
 def dense_latency_limit(dt_p95: float | None, config: PluginConfig) -> float:
-    """给稠密设备计算允许的延迟上限。"""
+    """给稠密设备计算允许的延迟上限。
+
+    Args:
+        dt_p95: 输入参数。
+        config: 插件配置。
+
+    Returns:
+        float: 稠密采样情况下允许的延迟上限。
+    """
     if dt_p95 is None:
         return float(config.idle_flush_seconds)
     return config.lag_points * dt_p95

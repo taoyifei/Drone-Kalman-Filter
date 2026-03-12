@@ -32,7 +32,16 @@ def forward_filter(
     measurements: np.ndarray,
     config: PluginConfig,
 ) -> FilterPass:
-    """执行前向 Kalman 滤波。"""
+    """执行前向 Kalman 滤波。
+
+    Args:
+        observations: 观测消息序列。
+        measurements: 观测向量序列。
+        config: 插件配置。
+
+    Returns:
+        FilterPass: 前向滤波阶段的结果。
+    """
     size = len(observations)
     identity = np.eye(4)
     observation_matrix = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]],
@@ -106,7 +115,14 @@ def forward_filter(
 
 
 def backward_smooth(filter_pass: FilterPass) -> list[np.ndarray]:
-    """执行后向 RTS 平滑。"""
+    """执行后向 RTS 平滑。
+
+    Args:
+        filter_pass: 前向滤波阶段的结果。
+
+    Returns:
+        list[np.ndarray]: RTS 反向平滑后的状态序列。
+    """
     size = len(filter_pass.filtered_states)
     smoothed_states = [state.copy() for state in filter_pass.filtered_states]
     smoothed_covariances = [
