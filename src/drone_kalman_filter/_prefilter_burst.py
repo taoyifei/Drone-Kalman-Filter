@@ -22,6 +22,127 @@ from drone_kalman_filter._prefilter_types import (
     TrustedAnchor,
 )
 
+FUSION_DEVICE_ID = "fusion"
+FUSION_JUMP_SPEED_MPS = 60.0
+FUSION_JUMP_DISTANCE_M = 40.0
+FUSION_STABLE_SPEED_MPS = 25.0
+FUSION_STABLE_DISTANCE_M = 20.0
+FUSION_MIN_BURST_STEPS = 2
+FUSION_REQUIRED_STABLE_STEPS = 2
+
+
+def repair_points_fusion_micro_burst(
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    *,
+    seed_anchor: TrustedAnchor | None = None,
+) -> tuple[list[LocalPoint], list[bool]] | None:
+    """Repair short high-frequency bursts specific to the fusion device.
+
+    Args:
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        tuple[list[LocalPoint], list[bool]] | None:
+            若命中 fusion 微突跳，则返回修复后的点和改动标记；
+            否则返回 None。
+    """
+    if not _is_fusion_device(observations):
+        return None
+    if len(raw_points) < FUSION_MIN_BURST_STEPS + 2:
+        return None
+
+    repaired: list[LocalPoint] = []
+    altered_flags: list[bool] = []
+    index = 0
+
+    if seed_anchor is None:
+        repaired.append(raw_points[0])
+        altered_flags.append(False)
+        index = 1
+
+    had_repair = False
+    while index < len(raw_points):
+        burst_start = _find_fusion_burst_start(
+            start_index=index,
+            observations=observations,
+            raw_points=raw_points,
+            config=config,
+            seed_anchor=seed_anchor,
+        )
+        if burst_start is None:
+            _append_raw_points(
+                repaired,
+                altered_flags,
+                raw_points,
+                start=index,
+                stop=len(raw_points),
+            )
+            break
+
+        if burst_start > index:
+            _append_raw_points(
+                repaired,
+                altered_flags,
+                raw_points,
+                start=index,
+                stop=burst_start,
+            )
+
+        burst_end = _find_fusion_burst_end(
+            start_index=burst_start,
+            observations=observations,
+            raw_points=raw_points,
+            config=config,
+            seed_anchor=seed_anchor,
+        )
+        left_anchor_point, left_anchor_time = _fusion_left_anchor(
+            burst_start=burst_start,
+            observations=observations,
+            raw_points=raw_points,
+            seed_anchor=seed_anchor,
+        )
+        right_anchor_index = _find_fusion_stable_anchor(
+            burst_end=burst_end,
+            observations=observations,
+            raw_points=raw_points,
+            config=config,
+            seed_anchor=seed_anchor,
+        )
+
+        if right_anchor_index is None:
+            for burst_index in range(burst_start, burst_end + 1):
+                repaired.append(left_anchor_point)
+                altered_flags.append(True)
+            had_repair = True
+            index = burst_end + 1
+            continue
+
+        right_anchor_point = raw_points[right_anchor_index]
+        right_anchor_time = observations[right_anchor_index].event_time
+        for burst_index in range(burst_start, right_anchor_index):
+            repaired.append(
+                interpolate_point(
+                    left_point=left_anchor_point,
+                    right_point=right_anchor_point,
+                    left_time=left_anchor_time,
+                    current_time=observations[burst_index].event_time,
+                    right_time=right_anchor_time,
+                ))
+            altered_flags.append(True)
+        repaired.append(right_anchor_point)
+        altered_flags.append(False)
+        had_repair = True
+        index = right_anchor_index + 1
+
+    if not had_repair:
+        return None
+    return repaired, altered_flags
+
 
 def has_burst_candidate(
     observations: list[ParsedMessage],
@@ -97,6 +218,285 @@ def has_burst_candidate(
         index += 1
 
     return False
+
+
+def _is_fusion_device(observations: list[ParsedMessage]) -> bool:
+    """Check whether the current buffer belongs to the fusion device.
+
+    Args:
+        observations: 观测消息序列。
+
+    Returns:
+        bool: 当前窗口是否来自 fusion 设备。
+    """
+    if not observations:
+        return False
+    track_key = observations[0].track_key
+    return track_key is not None and track_key.device_id == FUSION_DEVICE_ID
+
+
+def _append_raw_points(
+    repaired: list[LocalPoint],
+    altered_flags: list[bool],
+    raw_points: list[LocalPoint],
+    *,
+    start: int,
+    stop: int,
+) -> None:
+    """Append untouched raw points into the repaired output.
+
+    Args:
+        repaired: 修复后点序列。
+        altered_flags: 改动标记序列。
+        raw_points: 原始点序列。
+        start: 起始索引。
+        stop: 结束索引（开区间）。
+
+    Returns:
+        None: 不返回值。
+    """
+    for point in raw_points[start:stop]:
+        repaired.append(point)
+        altered_flags.append(False)
+
+
+def _find_fusion_burst_start(
+    *,
+    start_index: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    seed_anchor: TrustedAnchor | None,
+) -> int | None:
+    """Find the first fusion micro-burst start index in the visible window.
+
+    Args:
+        start_index: 当前扫描起点。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        int | None: 命中的 burst 起点；若无命中则返回 None。
+    """
+    search_stop = len(raw_points) - FUSION_MIN_BURST_STEPS + 1
+    for index in range(start_index, search_stop):
+        if not _fusion_step_is_jump(
+                point_index=index,
+                observations=observations,
+                raw_points=raw_points,
+                config=config,
+                seed_anchor=seed_anchor):
+            continue
+        if _fusion_step_is_jump(
+                point_index=index + 1,
+                observations=observations,
+                raw_points=raw_points,
+                config=config,
+                seed_anchor=seed_anchor):
+            return index
+    return None
+
+
+def _find_fusion_burst_end(
+    *,
+    start_index: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    seed_anchor: TrustedAnchor | None,
+) -> int:
+    """Extend a fusion burst until the abnormal adjacent steps stop.
+
+    Args:
+        start_index: burst 起点。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        int: burst 终点索引。
+    """
+    burst_end = start_index + FUSION_MIN_BURST_STEPS - 1
+    while burst_end + 1 < len(raw_points):
+        if not _fusion_step_is_jump(
+                point_index=burst_end + 1,
+                observations=observations,
+                raw_points=raw_points,
+                config=config,
+                seed_anchor=seed_anchor):
+            break
+        burst_end += 1
+    return burst_end
+
+
+def _find_fusion_stable_anchor(
+    *,
+    burst_end: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    seed_anchor: TrustedAnchor | None,
+) -> int | None:
+    """Find the first future point that starts a stable two-step recovery.
+
+    Args:
+        burst_end: burst 终点。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        int | None: 右锚点索引；若当前窗口内不可见则返回 None。
+    """
+    last_candidate = len(raw_points) - FUSION_REQUIRED_STABLE_STEPS
+    for candidate_index in range(burst_end + 1, last_candidate + 1):
+        is_stable = True
+        for offset in range(FUSION_REQUIRED_STABLE_STEPS):
+            if not _fusion_step_is_stable(
+                    point_index=candidate_index + offset,
+                    observations=observations,
+                    raw_points=raw_points,
+                    config=config,
+                    seed_anchor=seed_anchor):
+                is_stable = False
+                break
+        if is_stable:
+            return candidate_index
+    return None
+
+
+def _fusion_left_anchor(
+    *,
+    burst_start: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    seed_anchor: TrustedAnchor | None,
+) -> tuple[LocalPoint, datetime]:
+    """Return the last stable point before a fusion burst.
+
+    Args:
+        burst_start: burst 起点。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        tuple[LocalPoint, datetime]: 左锚点及其时间。
+    """
+    if burst_start == 0:
+        if seed_anchor is None:
+            return raw_points[0], observations[0].event_time
+        return seed_anchor.point, seed_anchor.event_time
+    left_index = burst_start - 1
+    return raw_points[left_index], observations[left_index].event_time
+
+
+def _fusion_step_is_jump(
+    *,
+    point_index: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    seed_anchor: TrustedAnchor | None,
+) -> bool:
+    """Judge whether the adjacent raw step is a fusion micro-jump.
+
+    Args:
+        point_index: 步长终点索引。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        bool: 当前相邻步是否满足 fusion 微突跳条件。
+    """
+    previous_point, previous_time = _fusion_step_previous(
+        point_index=point_index,
+        observations=observations,
+        raw_points=raw_points,
+        seed_anchor=seed_anchor,
+    )
+    if previous_point is None or previous_time is None:
+        return False
+    step_distance = distance(previous_point, raw_points[point_index])
+    step_dt = max(
+        (observations[point_index].event_time - previous_time)
+        .total_seconds(),
+        config.min_dt_seconds,
+    )
+    step_speed = step_distance / step_dt
+    return (step_speed > FUSION_JUMP_SPEED_MPS or
+            step_distance > FUSION_JUMP_DISTANCE_M)
+
+
+def _fusion_step_is_stable(
+    *,
+    point_index: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    seed_anchor: TrustedAnchor | None,
+) -> bool:
+    """Judge whether the adjacent raw step is stable enough for recovery.
+
+    Args:
+        point_index: 步长终点索引。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        bool: 当前相邻步是否满足稳定恢复条件。
+    """
+    previous_point, previous_time = _fusion_step_previous(
+        point_index=point_index,
+        observations=observations,
+        raw_points=raw_points,
+        seed_anchor=seed_anchor,
+    )
+    if previous_point is None or previous_time is None:
+        return False
+    step_distance = distance(previous_point, raw_points[point_index])
+    step_dt = max(
+        (observations[point_index].event_time - previous_time)
+        .total_seconds(),
+        config.min_dt_seconds,
+    )
+    step_speed = step_distance / step_dt
+    return (step_speed <= FUSION_STABLE_SPEED_MPS and
+            step_distance <= FUSION_STABLE_DISTANCE_M)
+
+
+def _fusion_step_previous(
+    *,
+    point_index: int,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    seed_anchor: TrustedAnchor | None,
+) -> tuple[LocalPoint | None, datetime | None]:
+    """Resolve the previous point used for an adjacent step judgement.
+
+    Args:
+        point_index: 步长终点索引。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        tuple[LocalPoint | None, datetime | None]:
+            当前步长的前一点及其时间；不可判定时返回 None。
+    """
+    if point_index <= 0:
+        if seed_anchor is None:
+            return None, None
+        return seed_anchor.point, seed_anchor.event_time
+    return raw_points[point_index - 1], observations[point_index - 1].event_time
 
 
 def repair_points_burst(
