@@ -102,6 +102,14 @@ def load_aligned_points(raw_path: str | Path,
         if event_time is None:
             raise AcceptanceError(f"Invalid eventTime at line {line_no}.")
 
+        raw_latitude = as_float(raw_position.get("latitude"))
+        raw_longitude = as_float(raw_position.get("longitude"))
+        smoothed_latitude = as_float(smoothed_position.get("latitude"))
+        smoothed_longitude = as_float(smoothed_position.get("longitude"))
+        if smoothed_latitude is None or smoothed_longitude is None:
+            raise AcceptanceError(
+                f"Invalid smoothed coordinates at line {line_no}.")
+
         points.append(
             AlignedPoint(
                 line_no=line_no,
@@ -110,10 +118,10 @@ def load_aligned_points(raw_path: str | Path,
                 trace_id=as_str(raw_identity.get("traceId")),
                 event_time_text=raw_payload.get("eventTime"),
                 event_time=event_time,
-                raw_latitude=as_float(raw_position.get("latitude")),
-                raw_longitude=as_float(raw_position.get("longitude")),
-                smoothed_latitude=as_float(smoothed_position.get("latitude")),
-                smoothed_longitude=as_float(smoothed_position.get("longitude")),
+                raw_latitude=raw_latitude,
+                raw_longitude=raw_longitude,
+                smoothed_latitude=smoothed_latitude,
+                smoothed_longitude=smoothed_longitude,
             ))
 
     return points

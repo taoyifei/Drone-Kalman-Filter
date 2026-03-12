@@ -56,8 +56,8 @@ def compute_device_acceptance(
     Returns:
         DeviceAcceptanceResult: 单设备的验收结果。
     """
-    dt_values = estimate_release_dt_values(rows)
-    latency_values = estimate_release_latencies(rows, config)
+    dt_values = flatten_dt_values(segments)
+    latency_values = flatten_latency_values(segments, config)
 
     global_offset_values: list[float] = []
     normal_offset_values: list[float] = []
@@ -95,8 +95,14 @@ def compute_device_acceptance(
             "line_no": value["line_no"],
         } for value in segment_recoveries)
 
-    raw_flip_count = count_direction_flips(rows, use_smoothed=False)
-    smoothed_flip_count = count_direction_flips(rows, use_smoothed=True)
+    raw_flip_count = sum(
+        count_direction_flips(segment, use_smoothed=False)
+        for segment in segments
+    )
+    smoothed_flip_count = sum(
+        count_direction_flips(segment, use_smoothed=True)
+        for segment in segments
+    )
 
     point_count = sum(len(segment) for segment in segments)
     dt_stats = distribution(dt_values, include_max=True)
@@ -233,6 +239,21 @@ def estimate_release_dt_values(points: list[AlignedPoint]) -> list[float]:
     return values
 
 
+def flatten_dt_values(segments: list[list[AlignedPoint]]) -> list[float]:
+    """汇总所有片段内部的相邻时间间隔。
+
+    Args:
+        segments: 当前设备的连续片段列表。
+
+    Returns:
+        list[float]: 所有片段内部的时间间隔集合。
+    """
+    values: list[float] = []
+    for segment in segments:
+        values.extend(estimate_release_dt_values(segment))
+    return values
+
+
 def estimate_release_latencies(points: list[AlignedPoint],
                                config: PluginConfig) -> list[float]:
     """离线估算 fixed-lag 输出延迟。
@@ -253,6 +274,25 @@ def estimate_release_latencies(points: list[AlignedPoint],
             values.append(min(max(delta, 0.0), config.idle_flush_seconds))
         else:
             values.append(config.idle_flush_seconds)
+    return values
+
+
+def flatten_latency_values(
+    segments: list[list[AlignedPoint]],
+    config: PluginConfig,
+) -> list[float]:
+    """汇总所有片段的估计输出延迟。
+
+    Args:
+        segments: 当前设备的连续片段列表。
+        config: 插件配置。
+
+    Returns:
+        list[float]: 所有片段的 fixed-lag 延迟估计。
+    """
+    values: list[float] = []
+    for segment in segments:
+        values.extend(estimate_release_latencies(segment, config))
     return values
 
 

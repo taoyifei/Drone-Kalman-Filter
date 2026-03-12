@@ -56,15 +56,10 @@ def repair_points_fusion_micro_burst(
     if len(raw_points) < FUSION_MIN_BURST_STEPS + 2:
         return None
 
-    repaired: list[LocalPoint] = []
-    altered_flags: list[bool] = []
-    index = 0
-
-    if seed_anchor is None:
-        repaired.append(raw_points[0])
-        altered_flags.append(False)
-        index = 1
-
+    repaired, altered_flags, index = _initial_fusion_repair_state(
+        raw_points,
+        seed_anchor,
+    )
     had_repair = False
     while index < len(raw_points):
         burst_start = _find_fusion_burst_start(
@@ -83,65 +78,186 @@ def repair_points_fusion_micro_burst(
                 stop=len(raw_points),
             )
             break
-
-        if burst_start > index:
-            _append_raw_points(
-                repaired,
-                altered_flags,
-                raw_points,
-                start=index,
-                stop=burst_start,
-            )
-
-        burst_end = _find_fusion_burst_end(
-            start_index=burst_start,
-            observations=observations,
-            raw_points=raw_points,
-            config=config,
-            seed_anchor=seed_anchor,
-        )
-        left_anchor_point, left_anchor_time = _fusion_left_anchor(
+        _append_fusion_gap(
+            repaired,
+            altered_flags,
+            raw_points,
+            index=index,
             burst_start=burst_start,
-            observations=observations,
-            raw_points=raw_points,
-            seed_anchor=seed_anchor,
         )
-        right_anchor_index = _find_fusion_stable_anchor(
-            burst_end=burst_end,
-            observations=observations,
-            raw_points=raw_points,
-            config=config,
-            seed_anchor=seed_anchor,
+        index, repaired_once = _repair_fusion_burst(
+            repaired,
+            altered_flags,
+            observations,
+            raw_points,
+            config,
+            seed_anchor,
+            burst_start,
         )
-
-        if right_anchor_index is None:
-            for burst_index in range(burst_start, burst_end + 1):
-                repaired.append(left_anchor_point)
-                altered_flags.append(True)
-            had_repair = True
-            index = burst_end + 1
-            continue
-
-        right_anchor_point = raw_points[right_anchor_index]
-        right_anchor_time = observations[right_anchor_index].event_time
-        for burst_index in range(burst_start, right_anchor_index):
-            repaired.append(
-                interpolate_point(
-                    left_point=left_anchor_point,
-                    right_point=right_anchor_point,
-                    left_time=left_anchor_time,
-                    current_time=observations[burst_index].event_time,
-                    right_time=right_anchor_time,
-                ))
-            altered_flags.append(True)
-        repaired.append(right_anchor_point)
-        altered_flags.append(False)
-        had_repair = True
-        index = right_anchor_index + 1
+        had_repair = had_repair or repaired_once
 
     if not had_repair:
         return None
     return repaired, altered_flags
+
+
+def _initial_fusion_repair_state(
+    raw_points: list[LocalPoint],
+    seed_anchor: TrustedAnchor | None,
+) -> tuple[list[LocalPoint], list[bool], int]:
+    """初始化 fusion 微突跳修复的输出状态。
+
+    Args:
+        raw_points: 原始局部坐标点序列。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        tuple[list[LocalPoint], list[bool], int]:
+            初始 repaired 列表、改动标记和起始索引。
+    """
+    repaired: list[LocalPoint] = []
+    altered_flags: list[bool] = []
+    index = 0
+    if seed_anchor is None:
+        repaired.append(raw_points[0])
+        altered_flags.append(False)
+        index = 1
+    return repaired, altered_flags, index
+
+
+def _append_fusion_gap(
+    repaired: list[LocalPoint],
+    altered_flags: list[bool],
+    raw_points: list[LocalPoint],
+    *,
+    index: int,
+    burst_start: int,
+) -> None:
+    """补上 fusion burst 前未改动的原始点。
+
+    Args:
+        repaired: 修复后点序列。
+        altered_flags: 改动标记序列。
+        raw_points: 原始局部坐标点序列。
+        index: 当前扫描位置。
+        burst_start: burst 起点。
+
+    Returns:
+        None: 不返回值。
+    """
+    if burst_start <= index:
+        return
+    _append_raw_points(
+        repaired,
+        altered_flags,
+        raw_points,
+        start=index,
+        stop=burst_start,
+    )
+
+
+def _repair_fusion_burst(
+    repaired: list[LocalPoint],
+    altered_flags: list[bool],
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+    seed_anchor: TrustedAnchor | None,
+    burst_start: int,
+) -> tuple[int, bool]:
+    """修复一次 fusion 微突跳 burst。
+
+    Args:
+        repaired: 修复后点序列。
+        altered_flags: 改动标记序列。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+        seed_anchor: 跨窗口延续的可信锚点。
+        burst_start: burst 起点。
+
+    Returns:
+        tuple[int, bool]: 下一次扫描索引以及是否发生了修复。
+    """
+    burst_end = _find_fusion_burst_end(
+        start_index=burst_start,
+        observations=observations,
+        raw_points=raw_points,
+        config=config,
+        seed_anchor=seed_anchor,
+    )
+    left_anchor_point, left_anchor_time = _fusion_left_anchor(
+        burst_start=burst_start,
+        observations=observations,
+        raw_points=raw_points,
+        seed_anchor=seed_anchor,
+    )
+    right_anchor_index = _find_fusion_stable_anchor(
+        burst_end=burst_end,
+        observations=observations,
+        raw_points=raw_points,
+        config=config,
+        seed_anchor=seed_anchor,
+    )
+    if right_anchor_index is None:
+        for _ in range(burst_start, burst_end + 1):
+            repaired.append(left_anchor_point)
+            altered_flags.append(True)
+        return burst_end + 1, True
+    _append_interpolated_fusion_points(
+        repaired,
+        altered_flags,
+        observations,
+        raw_points,
+        burst_start=burst_start,
+        right_anchor_index=right_anchor_index,
+        left_anchor_point=left_anchor_point,
+        left_anchor_time=left_anchor_time,
+    )
+    return right_anchor_index + 1, True
+
+
+def _append_interpolated_fusion_points(
+    repaired: list[LocalPoint],
+    altered_flags: list[bool],
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    *,
+    burst_start: int,
+    right_anchor_index: int,
+    left_anchor_point: LocalPoint,
+    left_anchor_time: datetime,
+) -> None:
+    """把 fusion burst 区间按时间插值回写到输出序列。
+
+    Args:
+        repaired: 修复后点序列。
+        altered_flags: 改动标记序列。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        burst_start: burst 起点。
+        right_anchor_index: 右锚点索引。
+        left_anchor_point: 左锚点位置。
+        left_anchor_time: 左锚点时间。
+
+    Returns:
+        None: 不返回值。
+    """
+    right_anchor_point = raw_points[right_anchor_index]
+    right_anchor_time = observations[right_anchor_index].event_time
+    for burst_index in range(burst_start, right_anchor_index):
+        repaired.append(
+            interpolate_point(
+                left_point=left_anchor_point,
+                right_point=right_anchor_point,
+                left_time=left_anchor_time,
+                current_time=observations[burst_index].event_time,
+                right_time=right_anchor_time,
+            )
+        )
+        altered_flags.append(True)
+    repaired.append(right_anchor_point)
+    altered_flags.append(False)
 
 
 def has_burst_candidate(
@@ -164,14 +280,11 @@ def has_burst_candidate(
     if len(raw_points) < 3:
         return False
 
-    if seed_anchor is None:
-        last_trusted_point = raw_points[0]
-        last_trusted_time = observations[0].event_time
-        index = 1
-    else:
-        last_trusted_point = seed_anchor.point
-        last_trusted_time = seed_anchor.event_time
-        index = 0
+    last_trusted_point, last_trusted_time, index = _initial_trusted_anchor(
+        observations,
+        raw_points,
+        seed_anchor,
+    )
 
     while index < len(raw_points):
         suspicion = classify_suspicion(
@@ -188,36 +301,119 @@ def has_burst_candidate(
             index += 1
             continue
 
-        run_end = index
-        while (run_end + 1 < len(raw_points) and
-               run_end - index + 1 < config.prefilter_burst_max_run_length):
-            local_dt = dt_seconds(observations[run_end],
-                                  observations[run_end + 1], config)
-            if local_dt > config.prefilter_hard_distance_dt_seconds:
-                break
-            next_suspicion = classify_suspicion(
-                anchor_point=last_trusted_point,
-                anchor_time=last_trusted_time,
-                index=run_end + 1,
-                observations=observations,
-                raw_points=raw_points,
-                config=config,
-            )
-            if not next_suspicion.is_suspicious:
-                break
-            run_end += 1
-
-        if run_end > index and qualifies_as_burst(
-                anchor_point=last_trusted_point,
-                raw_points=raw_points,
-                start_index=index,
-                run_end=run_end,
+        run_end = _extend_suspicious_run(
+            start_index=index,
+            anchor_point=last_trusted_point,
+            anchor_time=last_trusted_time,
+            observations=observations,
+            raw_points=raw_points,
+            config=config,
+        )
+        if _qualifies_candidate_run(
+            anchor_point=last_trusted_point,
+            raw_points=raw_points,
+            start_index=index,
+            run_end=run_end,
         ):
             return True
 
         index += 1
 
     return False
+
+
+def _initial_trusted_anchor(
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    seed_anchor: TrustedAnchor | None,
+) -> tuple[LocalPoint, datetime, int]:
+    """构造 burst 候选扫描的初始可信锚点。
+
+    Args:
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        seed_anchor: 跨窗口延续的可信锚点。
+
+    Returns:
+        tuple[LocalPoint, datetime, int]: 可信锚点、锚点时间和起始索引。
+    """
+    if seed_anchor is None:
+        return raw_points[0], observations[0].event_time, 1
+    return seed_anchor.point, seed_anchor.event_time, 0
+
+
+def _extend_suspicious_run(
+    *,
+    start_index: int,
+    anchor_point: LocalPoint,
+    anchor_time: datetime,
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    config: PluginConfig,
+) -> int:
+    """扩展当前连续可疑 run 的结束位置。
+
+    Args:
+        start_index: 连续可疑区间的起始索引。
+        anchor_point: 当前可信锚点。
+        anchor_time: 当前可信锚点时间。
+        observations: 观测消息序列。
+        raw_points: 原始局部坐标点序列。
+        config: 插件配置。
+
+    Returns:
+        int: 连续可疑区间的结束索引。
+    """
+    run_end = start_index
+    while (
+        run_end + 1 < len(raw_points)
+        and run_end - start_index + 1 < config.prefilter_burst_max_run_length
+    ):
+        local_dt = dt_seconds(
+            observations[run_end],
+            observations[run_end + 1],
+            config,
+        )
+        if local_dt > config.prefilter_hard_distance_dt_seconds:
+            break
+        next_suspicion = classify_suspicion(
+            anchor_point=anchor_point,
+            anchor_time=anchor_time,
+            index=run_end + 1,
+            observations=observations,
+            raw_points=raw_points,
+            config=config,
+        )
+        if not next_suspicion.is_suspicious:
+            break
+        run_end += 1
+    return run_end
+
+
+def _qualifies_candidate_run(
+    *,
+    anchor_point: LocalPoint,
+    raw_points: list[LocalPoint],
+    start_index: int,
+    run_end: int,
+) -> bool:
+    """判断当前连续可疑 run 是否构成 burst 候选。
+
+    Args:
+        anchor_point: 当前可信锚点。
+        raw_points: 原始局部坐标点序列。
+        start_index: 连续可疑区间的起始索引。
+        run_end: 连续可疑区间的结束索引。
+
+    Returns:
+        bool: 是否构成 burst 候选。
+    """
+    return run_end > start_index and qualifies_as_burst(
+        anchor_point=anchor_point,
+        raw_points=raw_points,
+        start_index=start_index,
+        run_end=run_end,
+    )
 
 
 def _is_fusion_device(observations: list[ParsedMessage]) -> bool:
@@ -525,13 +721,11 @@ def repair_points_burst(
         repaired.append(raw_points[0])
         repaired_times.append(observations[0].event_time)
         altered_flags.append(False)
-        last_trusted_point = raw_points[0]
-        last_trusted_time = observations[0].event_time
-        index = 1
-    else:
-        last_trusted_point = seed_anchor.point
-        last_trusted_time = seed_anchor.event_time
-        index = 0
+    last_trusted_point, last_trusted_time, index = _initial_trusted_anchor(
+        observations,
+        raw_points,
+        seed_anchor,
+    )
 
     while index < len(raw_points):
         suspicion = classify_suspicion(
@@ -543,34 +737,27 @@ def repair_points_burst(
             config=config,
         )
         if not suspicion.is_suspicious:
-            repaired.append(raw_points[index])
-            repaired_times.append(observations[index].event_time)
-            altered_flags.append(False)
+            _append_trusted_point(
+                repaired,
+                repaired_times,
+                altered_flags,
+                raw_points[index],
+                observations[index].event_time,
+            )
             last_trusted_point = raw_points[index]
             last_trusted_time = observations[index].event_time
             index += 1
             continue
 
-        run_end = index
-        while (run_end + 1 < len(raw_points) and
-               run_end - index + 1 < config.prefilter_burst_max_run_length):
-            local_dt = dt_seconds(observations[run_end],
-                                  observations[run_end + 1], config)
-            if local_dt > config.prefilter_hard_distance_dt_seconds:
-                break
-            next_suspicion = classify_suspicion(
-                anchor_point=last_trusted_point,
-                anchor_time=last_trusted_time,
-                index=run_end + 1,
-                observations=observations,
-                raw_points=raw_points,
-                config=config,
-            )
-            if not next_suspicion.is_suspicious:
-                break
-            run_end += 1
-
-        is_burst = run_end > index and qualifies_as_burst(
+        run_end = _extend_suspicious_run(
+            start_index=index,
+            anchor_point=last_trusted_point,
+            anchor_time=last_trusted_time,
+            observations=observations,
+            raw_points=raw_points,
+            config=config,
+        )
+        is_burst = _qualifies_candidate_run(
             anchor_point=last_trusted_point,
             raw_points=raw_points,
             start_index=index,
@@ -587,9 +774,13 @@ def repair_points_burst(
                 last_trusted_time,
                 config,
             )
-            repaired.append(repaired_point)
-            repaired_times.append(observations[index].event_time)
-            altered_flags.append(True)
+            _append_repaired_point(
+                repaired,
+                repaired_times,
+                altered_flags,
+                repaired_point,
+                observations[index].event_time,
+            )
             last_trusted_point = repaired_point
             last_trusted_time = observations[index].event_time
             index += 1
@@ -606,25 +797,30 @@ def repair_points_burst(
         )
 
         if anchor.anchor_index is None:
-            for current_index in range(index, anchor.repair_end + 1):
-                repaired.append(last_trusted_point)
-                repaired_times.append(observations[current_index].event_time)
-                altered_flags.append(True)
+            _append_held_burst_points(
+                repaired,
+                repaired_times,
+                altered_flags,
+                observations,
+                anchor_point=last_trusted_point,
+                start_index=index,
+                repair_end=anchor.repair_end,
+            )
             had_burst_repair = True
             index = anchor.repair_end + 1
             continue
 
-        for current_index in range(index, anchor.anchor_index):
-            repaired.append(
-                interpolate_point(
-                    left_point=last_trusted_point,
-                    right_point=raw_points[anchor.anchor_index],
-                    left_time=last_trusted_time,
-                    current_time=observations[current_index].event_time,
-                    right_time=observations[anchor.anchor_index].event_time,
-                ))
-            repaired_times.append(observations[current_index].event_time)
-            altered_flags.append(True)
+        _append_interpolated_burst_points(
+            repaired,
+            repaired_times,
+            altered_flags,
+            observations,
+            raw_points,
+            anchor_point=last_trusted_point,
+            anchor_time=last_trusted_time,
+            start_index=index,
+            anchor_index=anchor.anchor_index,
+        )
         repaired.append(raw_points[anchor.anchor_index])
         had_burst_repair = True
         repaired_times.append(observations[anchor.anchor_index].event_time)
@@ -634,6 +830,126 @@ def repair_points_burst(
         index = anchor.anchor_index + 1
 
     return repaired, had_burst_repair, altered_flags
+
+
+def _append_trusted_point(
+    repaired: list[LocalPoint],
+    repaired_times: list[datetime],
+    altered_flags: list[bool],
+    point: LocalPoint,
+    event_time: datetime,
+) -> None:
+    """追加一个未修改的可信点。
+
+    Args:
+        repaired: 修复后点序列。
+        repaired_times: 修复点时间序列。
+        altered_flags: 改动标记序列。
+        point: 待追加点。
+        event_time: 待追加点时间。
+
+    Returns:
+        None: 不返回值。
+    """
+    repaired.append(point)
+    repaired_times.append(event_time)
+    altered_flags.append(False)
+
+
+def _append_repaired_point(
+    repaired: list[LocalPoint],
+    repaired_times: list[datetime],
+    altered_flags: list[bool],
+    point: LocalPoint,
+    event_time: datetime,
+) -> None:
+    """追加一个被修复的单点结果。
+
+    Args:
+        repaired: 修复后点序列。
+        repaired_times: 修复点时间序列。
+        altered_flags: 改动标记序列。
+        point: 待追加点。
+        event_time: 待追加点时间。
+
+    Returns:
+        None: 不返回值。
+    """
+    repaired.append(point)
+    repaired_times.append(event_time)
+    altered_flags.append(True)
+
+
+def _append_held_burst_points(
+    repaired: list[LocalPoint],
+    repaired_times: list[datetime],
+    altered_flags: list[bool],
+    observations: list[ParsedMessage],
+    *,
+    anchor_point: LocalPoint,
+    start_index: int,
+    repair_end: int,
+) -> None:
+    """把无右锚点的 burst 全部保持在左锚点位置。
+
+    Args:
+        repaired: 修复后点序列。
+        repaired_times: 修复点时间序列。
+        altered_flags: 改动标记序列。
+        observations: 观测消息序列。
+        anchor_point: 左锚点位置。
+        start_index: 修复起点。
+        repair_end: 修复终点。
+
+    Returns:
+        None: 不返回值。
+    """
+    for current_index in range(start_index, repair_end + 1):
+        repaired.append(anchor_point)
+        repaired_times.append(observations[current_index].event_time)
+        altered_flags.append(True)
+
+
+def _append_interpolated_burst_points(
+    repaired: list[LocalPoint],
+    repaired_times: list[datetime],
+    altered_flags: list[bool],
+    observations: list[ParsedMessage],
+    raw_points: list[LocalPoint],
+    *,
+    anchor_point: LocalPoint,
+    anchor_time: datetime,
+    start_index: int,
+    anchor_index: int,
+) -> None:
+    """把 burst 区间按左右锚点时间插值后写入输出序列。
+
+    Args:
+        repaired: 修复后点序列。
+        repaired_times: 修复点时间序列。
+        altered_flags: 改动标记序列。
+        observations: 观测消息序列。
+        raw_points: 原始局部平面点序列。
+        anchor_point: 左锚点位置。
+        anchor_time: 左锚点时间。
+        start_index: 修复起点。
+        anchor_index: 右锚点索引。
+
+    Returns:
+        None: 不返回值。
+    """
+    for current_index in range(start_index, anchor_index):
+        repaired.append(
+            interpolate_point(
+                left_point=anchor_point,
+                right_point=raw_points[anchor_index],
+                left_time=anchor_time,
+                current_time=observations[current_index].event_time,
+                right_time=observations[anchor_index].event_time,
+            )
+        )
+        repaired_times.append(observations[current_index].event_time)
+        altered_flags.append(True)
 
 
 def find_future_anchor(
