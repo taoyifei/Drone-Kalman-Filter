@@ -42,50 +42,34 @@ def forward_filter(
     Returns:
         FilterPass: 前向滤波阶段的结果。
     """
-    size = len(observations)
-    identity = np.eye(4)
-    observation_matrix = _observation_matrix()
-    base_r = np.eye(2, dtype=float) * (config.measurement_sigma_m**2)
-
-    filtered_states: list[np.ndarray] = []
-    filtered_covariances: list[np.ndarray] = []
-    predicted_states: list[np.ndarray | None] = [None] * size
-    predicted_covariances: list[np.ndarray | None] = [None] * size
-    transition_matrices: list[np.ndarray | None] = [None] * size
-
-    state, covariance = _initial_state(measurements, config)
-    filtered_states.append(state.copy())
-    filtered_covariances.append(covariance.copy())
+    (
+        size,
+        identity,
+        observation_matrix,
+        base_r,
+        filtered_states,
+        filtered_covariances,
+        predicted_states,
+        predicted_covariances,
+        transition_matrices,
+        state,
+        covariance,
+    ) = _initialize_filter_pass(observations, measurements, config)
 
     for index in range(1, size):
-        prediction = _predict_step(
+        state, covariance = _run_forward_filter_step(
             observations,
             state,
             covariance,
-            index,
-            config,
-        )
-        predicted_state, predicted_covariance, transition, dt = prediction
-        residual = measurements[index] - (observation_matrix @ predicted_state)
-        residual_speed = _residual_speed(residual, dt)
-        _record_prediction(
-            predicted_states,
-            predicted_covariances,
-            transition_matrices,
-            index,
-            predicted_state,
-            predicted_covariance,
-            transition,
-        )
-        state, covariance = _update_state(
-            predicted_state,
-            predicted_covariance,
-            residual,
-            residual_speed,
-            observation_matrix,
-            base_r,
-            identity,
-            config,
+            measurements,
+            index=index,
+            observation_matrix=observation_matrix,
+            base_r=base_r,
+            identity=identity,
+            predicted_states=predicted_states,
+            predicted_covariances=predicted_covariances,
+            transition_matrices=transition_matrices,
+            config=config,
         )
         filtered_states.append(state.copy())
         filtered_covariances.append(covariance.copy())
@@ -99,6 +83,136 @@ def forward_filter(
     )
 
 
+def _initialize_filter_pass(
+    observations: Sequence[ParsedMessage],
+    measurements: np.ndarray,
+    config: PluginConfig,
+) -> tuple[
+    int,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray | None],
+    list[np.ndarray | None],
+    list[np.ndarray | None],
+    np.ndarray,
+    np.ndarray,
+]:
+    """初始化前向滤波需要的缓存和首点状态。
+
+    Args:
+        observations: 观测消息序列。
+        measurements: 观测向量序列。
+        config: 插件配置。
+
+    Returns:
+        tuple[
+            int,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            list[np.ndarray],
+            list[np.ndarray],
+            list[np.ndarray | None],
+            list[np.ndarray | None],
+            list[np.ndarray | None],
+            np.ndarray,
+            np.ndarray,
+        ]: 前向滤波初始化后的完整上下文。
+    """
+    size = len(observations)
+    identity = np.eye(4)
+    observation_matrix = _observation_matrix()
+    base_r = np.eye(2, dtype=float) * (config.measurement_sigma_m**2)
+    filtered_states: list[np.ndarray] = []
+    filtered_covariances: list[np.ndarray] = []
+    predicted_states: list[np.ndarray | None] = [None] * size
+    predicted_covariances: list[np.ndarray | None] = [None] * size
+    transition_matrices: list[np.ndarray | None] = [None] * size
+    state, covariance = _initial_state(measurements, config)
+    filtered_states.append(state.copy())
+    filtered_covariances.append(covariance.copy())
+    return (
+        size,
+        identity,
+        observation_matrix,
+        base_r,
+        filtered_states,
+        filtered_covariances,
+        predicted_states,
+        predicted_covariances,
+        transition_matrices,
+        state,
+        covariance,
+    )
+
+
+def _run_forward_filter_step(
+    observations: Sequence[ParsedMessage],
+    state: np.ndarray,
+    covariance: np.ndarray,
+    measurements: np.ndarray,
+    *,
+    index: int,
+    observation_matrix: np.ndarray,
+    base_r: np.ndarray,
+    identity: np.ndarray,
+    predicted_states: list[np.ndarray | None],
+    predicted_covariances: list[np.ndarray | None],
+    transition_matrices: list[np.ndarray | None],
+    config: PluginConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """执行前向滤波的单步更新。
+
+    Args:
+        observations: 观测消息序列。
+        state: 当前滤波状态。
+        covariance: 当前滤波协方差。
+        measurements: 观测向量序列。
+        index: 当前步骤索引。
+        observation_matrix: 观测矩阵。
+        base_r: 基础观测噪声矩阵。
+        identity: 单位矩阵。
+        predicted_states: 预测状态序列。
+        predicted_covariances: 预测协方差序列。
+        transition_matrices: 状态转移矩阵序列。
+        config: 插件配置。
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: 更新后的状态和协方差。
+    """
+    predicted_state, predicted_covariance, transition, dt = _predict_step(
+        observations,
+        state,
+        covariance,
+        index,
+        config,
+    )
+    residual = measurements[index] - (observation_matrix @ predicted_state)
+    residual_speed = _residual_speed(residual, dt)
+    _record_prediction(
+        predicted_states,
+        predicted_covariances,
+        transition_matrices,
+        index,
+        predicted_state,
+        predicted_covariance,
+        transition,
+    )
+    return _update_state(
+        predicted_state,
+        predicted_covariance,
+        residual,
+        residual_speed,
+        observation_matrix,
+        base_r,
+        identity,
+        config,
+    )
+
+
 def backward_smooth(filter_pass: FilterPass) -> list[np.ndarray]:
     """执行后向 RTS 平滑。
 
@@ -108,9 +222,7 @@ def backward_smooth(filter_pass: FilterPass) -> list[np.ndarray]:
     Returns:
         list[np.ndarray]: RTS 反向平滑后的状态序列。
     """
-    smoothed_states = [
-        state.copy() for state in filter_pass.filtered_states
-    ]
+    smoothed_states = [state.copy() for state in filter_pass.filtered_states]
     smoothed_covariances = [
         covariance.copy()
         for covariance in filter_pass.filtered_covariances
