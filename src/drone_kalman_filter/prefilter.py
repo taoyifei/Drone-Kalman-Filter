@@ -12,6 +12,7 @@ from drone_kalman_filter.message import ParsedMessage, set_position_strings
 from drone_kalman_filter.segment import BufferedObservation
 from drone_kalman_filter._prefilter_burst import (
     has_burst_candidate,
+    repair_points_fusion_micro_burst,
     repair_points_burst,
 )
 from drone_kalman_filter._prefilter_geometry import (
@@ -144,9 +145,14 @@ class RobustPrefilterSegmentSmoother:
             None. 不接收额外参数。
 
         Returns:
-            tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool, list[SmoothedPosition]]: 修复后的观测、修复点、可锚定标记、是否走
-                                                                                                    burst
-                                                                                                    路径以及平滑结果。
+            tuple[
+                list[ParsedMessage],
+                list[LocalPoint],
+                list[bool],
+                bool,
+                list[SmoothedPosition],
+            ]:
+                修复后的观测、修复点、可锚定标记、是否走 burst 路径以及平滑结果。
         """
         (
             repaired_observations,
@@ -173,9 +179,8 @@ class RobustPrefilterSegmentSmoother:
             None. 不接收额外参数。
 
         Returns:
-            tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool]: 修复后的观测、输出点、可锚定标记以及是否走
-                                                                            burst
-                                                                            路径。
+            tuple[list[ParsedMessage], list[LocalPoint], list[bool], bool]:
+                修复后的观测、输出点、可锚定标记以及是否走 burst 路径。
         """
         observations = [item.parsed for item in self.buffer]
         if len(observations) <= 1:
@@ -189,6 +194,30 @@ class RobustPrefilterSegmentSmoother:
             LocalPoint(*self.plane.to_local(item.latitude, item.longitude))
             for item in observations
         ]
+        fusion_repair = repair_points_fusion_micro_burst(
+            observations,
+            raw_points,
+            self.config,
+            seed_anchor=self._trusted_anchor,
+        )
+        if fusion_repair is not None:
+            output_points, altered_flags = fusion_repair
+            anchorable_flags = [not altered for altered in altered_flags]
+            repaired_observations = []
+            for parsed, point in zip(observations, output_points):
+                latitude, longitude = self.plane.to_geodetic(
+                    point.east_m,
+                    point.north_m,
+                )
+                repaired_observations.append(
+                    replace(parsed, latitude=latitude, longitude=longitude))
+            return (
+                repaired_observations,
+                output_points,
+                anchorable_flags,
+                True,
+            )
+
         used_burst_path = self._burst_cooldown > 0 or has_burst_candidate(
             observations,
             raw_points,
