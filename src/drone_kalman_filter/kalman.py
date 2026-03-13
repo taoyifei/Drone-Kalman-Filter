@@ -10,7 +10,7 @@ import numpy as np
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.geo import LocalTangentPlane
 from drone_kalman_filter.message import ParsedMessage
-from drone_kalman_filter._kalman_rts import backward_smooth, forward_filter
+from drone_kalman_filter._kalman.rts import backward_smooth, forward_filter
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from drone_kalman_filter._metrics_statistics import as_float, as_str
+from drone_kalman_filter._metrics.statistics import as_float, as_str
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.message import parse_time
 

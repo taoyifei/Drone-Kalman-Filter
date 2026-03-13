@@ -6,7 +6,7 @@ from statistics import median
 
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.message import ParsedMessage
-from drone_kalman_filter._prefilter_types import LocalPoint
+from drone_kalman_filter._prefilter.types import LocalPoint
 
 
 def interpolate_point(

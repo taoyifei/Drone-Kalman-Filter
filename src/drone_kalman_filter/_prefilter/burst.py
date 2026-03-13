@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from drone_kalman_filter._prefilter_burst_core import (
+from drone_kalman_filter._prefilter.burst_core import (
     find_future_anchor,
     repair_points_burst,
 )
-from drone_kalman_filter._prefilter_fusion import (
+from drone_kalman_filter._prefilter.fusion import (
     FUSION_DEVICE_ID,
     FUSION_JUMP_DISTANCE_M,
     FUSION_JUMP_SPEED_MPS,
@@ -16,7 +16,7 @@ from drone_kalman_filter._prefilter_fusion import (
     FUSION_STABLE_SPEED_MPS,
     repair_points_fusion_micro_burst,
 )
-from drone_kalman_filter._prefilter_suspicion import (
+from drone_kalman_filter._prefilter.suspicion import (
     classify_suspicion,
     has_burst_candidate,
     is_bridge_spike_from_anchor,

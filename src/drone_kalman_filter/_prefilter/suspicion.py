@@ -6,7 +6,7 @@ from datetime import datetime
 
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.message import ParsedMessage
-from drone_kalman_filter._prefilter_geometry import (
+from drone_kalman_filter._prefilter.geometry import (
     distance,
     dot,
     dt_seconds,
@@ -15,7 +15,7 @@ from drone_kalman_filter._prefilter_geometry import (
     vector,
     vector_norm,
 )
-from drone_kalman_filter._prefilter_types import (
+from drone_kalman_filter._prefilter.types import (
     LocalPoint,
     Suspicion,
     TrustedAnchor,

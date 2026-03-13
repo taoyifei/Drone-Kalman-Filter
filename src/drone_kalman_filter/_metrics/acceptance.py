@@ -6,8 +6,8 @@ import math
 from dataclasses import dataclass
 
 from drone_kalman_filter.config import PluginConfig
-from drone_kalman_filter._metrics_alignment import AlignedPoint
-from drone_kalman_filter._metrics_statistics import (
+from drone_kalman_filter._metrics.alignment import AlignedPoint
+from drone_kalman_filter._metrics.statistics import (
     distribution,
     haversine_m,
     vector_angle_deg,
