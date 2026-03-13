@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.message import ParsedMessage
-from drone_kalman_filter._prefilter_geometry import (
+from drone_kalman_filter._prefilter.geometry import (
     distance,
     dt_seconds,
     extrapolate_point,
     interpolate_point,
 )
-from drone_kalman_filter._prefilter_types import LocalPoint
+from drone_kalman_filter._prefilter.types import LocalPoint
 
 
 def repair_points_legacy(

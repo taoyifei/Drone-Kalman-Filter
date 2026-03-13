@@ -6,17 +6,17 @@ from datetime import datetime
 
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.message import ParsedMessage
-from drone_kalman_filter._prefilter_geometry import (
+from drone_kalman_filter._prefilter.geometry import (
     distance,
     dt_seconds,
     interpolate_point,
 )
-from drone_kalman_filter._prefilter_types import (
+from drone_kalman_filter._prefilter.types import (
     BurstAnchor,
     LocalPoint,
     TrustedAnchor,
 )
-from drone_kalman_filter._prefilter_suspicion import (
+from drone_kalman_filter._prefilter.suspicion import (
     _extend_suspicious_run,
     _initial_trusted_anchor,
     _qualifies_candidate_run,

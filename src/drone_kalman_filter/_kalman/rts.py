@@ -7,7 +7,7 @@ from typing import Sequence
 
 import numpy as np
 
-from drone_kalman_filter._kalman_model import (
+from drone_kalman_filter._kalman.model import (
     effective_dt,
     process_noise,
     transition_matrix,

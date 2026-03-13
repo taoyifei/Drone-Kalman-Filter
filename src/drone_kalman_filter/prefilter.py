@@ -5,17 +5,17 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import replace
 
-from drone_kalman_filter._prefilter_burst import (
+from drone_kalman_filter._prefilter.burst import (
     has_burst_candidate,
     repair_points_burst,
     repair_points_fusion_micro_burst,
 )
-from drone_kalman_filter._prefilter_geometry import (
+from drone_kalman_filter._prefilter.geometry import (
     distance,
     median_filter_points,
 )
-from drone_kalman_filter._prefilter_legacy import repair_points_legacy
-from drone_kalman_filter._prefilter_types import LocalPoint, TrustedAnchor
+from drone_kalman_filter._prefilter.legacy import repair_points_legacy
+from drone_kalman_filter._prefilter.types import LocalPoint, TrustedAnchor
 from drone_kalman_filter.config import PluginConfig
 from drone_kalman_filter.geo import LocalTangentPlane
 from drone_kalman_filter.kalman import SmoothedPosition, smooth_positions

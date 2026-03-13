@@ -7,15 +7,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from drone_kalman_filter._metrics_acceptance import compute_device_acceptance
-from drone_kalman_filter._metrics_alignment import (
+from drone_kalman_filter._metrics.acceptance import compute_device_acceptance
+from drone_kalman_filter._metrics.alignment import (
     AcceptanceError,
     group_points_by_device as _group_points_by_device,
     group_points_by_track as _group_points_by_track,
     load_aligned_points as _load_aligned_points,
     split_segments_by_device as _split_segments_by_device,
 )
-from drone_kalman_filter._metrics_statistics import (
+from drone_kalman_filter._metrics.statistics import (
     as_float as _as_float,
     distribution as _distribution,
     haversine_m as _haversine_m,
